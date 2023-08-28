@@ -5,18 +5,19 @@ channels:
   - defaults
   - conda-forge
   - pytorch
+  - conda-forge/label/libint_dev
 dependencies:
   - python==3.10.*
 
   # Standard data analysis tools
   - pandas==1.*
-  - scipy==1.10.*
+  - scipy==1.*
   - jupyterlab
   - matplotlib
   - pytest
   
   # Quantum chemistry
-  - tblite==0.3.*
+  - psi4==1.8.*
 
   # Use Conda PyTorch to avoid OpenMP disagreement with other libraries
   - pytorch==2.0.*
@@ -24,5 +25,4 @@ dependencies:
 
   - pip
   - pip:
-    # Need torch for BOTorch
     - -e ..[test]
