@@ -15,6 +15,7 @@ dependencies:
   - jupyterlab
   - matplotlib
   - pytest
+  - scikit-learn
   
   # Quantum chemistry
   - psi4==1.8.*
