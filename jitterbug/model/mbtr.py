@@ -37,6 +37,12 @@ class MBTRCalculator(Calculator):
         energy_no_int = self.parameters['model'].predict(desc[None, :])
         self.results['energy'] = energy_no_int[0] + self.parameters['intercept']
 
+        # If desired, compute forces numerically
+        if 'forces' in properties:
+            temp_atoms: Atoms = atoms.copy()
+            temp_atoms.calc = self
+            self.results['forces'] = self.calculate_numerical_forces(temp_atoms)
+
     def train(self, train_set: list[Atoms]):
         """Train the embedded forcefield object
 
