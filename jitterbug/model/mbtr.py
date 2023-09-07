@@ -6,7 +6,6 @@ problem as a simple "molecule->energy" learning problem. Other methods,
 such as SOAP, provided atomic-level features that must require an
 extra step "molecule->atoms->energy/atom->energy".
 """
-import shutil
 from shutil import rmtree
 
 from ase.calculators.calculator import Calculator, all_changes
@@ -25,7 +24,7 @@ class MBTRCalculator(Calculator):
     implemented_properties = ['energy', 'forces']
     default_parameters = {
         'descriptor': MBTR(
-            species=["C", "H", "O"],
+            species=["H", "C", "N", "O"],
             geometry={"function": "inverse_distance"},
             grid={"min": 0, "max": 1, "n": 100, "sigma": 0.1},
             weighting={"function": "exp", "scale": 0.5, "threshold": 1e-3},
