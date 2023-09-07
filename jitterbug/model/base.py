@@ -16,11 +16,13 @@ class EnergyModel:
         """
         raise NotImplementedError()
 
-    def mean_hessian(self, model: object) -> list[np.ndarray]:
+    def mean_hessian(self, model: object) -> np.ndarray:
         """Produce the most-likely Hessian given the model
 
         Args:
-            model: Model trained by this
+            model: Model trained by this class
+        Returns:
+            The most-likely Hessian given the model
         """
 
     def sample_hessians(self, model: object, num_samples: int) -> list[np.ndarray]:
