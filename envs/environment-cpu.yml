@@ -20,6 +20,9 @@ dependencies:
   # Quantum chemistry
   - psi4==1.8.*
 
+  # Interatomic forcefields
+  - dscribe==2.1.*
+
   # Use Conda PyTorch to avoid OpenMP disagreement with other libraries
   - pytorch==2.0.*
   - cpuonly
