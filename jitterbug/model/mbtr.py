@@ -32,14 +32,15 @@ class MBTRCalculator(Calculator):
             normalization="l2",
         ),
         'model': LinearRegression(),
-        'intercept': 0.
+        'intercept': 0.,  # Normalizing parameters
+        'scale': 0.
     }
 
     def calculate(self, atoms=None, properties=('energy', 'forces'), system_changes=all_changes):
         # Compute the energy using the learned model
         desc = self.parameters['descriptor'].create_single(atoms)
         energy_no_int = self.parameters['model'].predict(desc[None, :])
-        self.results['energy'] = energy_no_int[0] + self.parameters['intercept']
+        self.results['energy'] = energy_no_int[0] * self.parameters['scale'] + self.parameters['intercept']
 
         # If desired, compute forces numerically
         if 'forces' in properties:
@@ -60,6 +61,8 @@ class MBTRCalculator(Calculator):
         energies = np.array([atoms.get_potential_energy() for atoms in train_set])
         self.parameters['intercept'] = energies.mean()
         energies -= self.parameters['intercept']
+        self.parameters['scale'] = energies.std()
+        energies /= self.parameters['scale']
 
         # Compute the descriptors and use them to fit the model
         desc = self.parameters['descriptor'].create(train_set)
