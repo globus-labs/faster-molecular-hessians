@@ -7,7 +7,7 @@ channels:
   - pytorch
   - conda-forge/label/libint_dev
 dependencies:
-  - python==3.10.*
+  - python==3.9.*
 
   # Standard data analysis tools
   - pandas==1.*
@@ -19,6 +19,9 @@ dependencies:
   
   # Quantum chemistry
   - psi4==1.8.*
+
+  # Interatomic forcefields
+  - dscribe==2.1.*
 
   # Use Conda PyTorch to avoid OpenMP disagreement with other libraries
   - pytorch==2.0.*
