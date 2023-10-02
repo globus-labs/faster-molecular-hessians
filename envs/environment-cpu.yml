@@ -18,7 +18,8 @@ dependencies:
   - scikit-learn
   
   # Quantum chemistry
-  - psi4==1.8.*
+  - psi4==1.8.*  # Remove for MacOS systems
+  - mopac
 
   # Interatomic forcefields
   - dscribe==2.1.*
@@ -29,4 +30,5 @@ dependencies:
 
   - pip
   - pip:
+    - git+https://gitlab.com/ase/ase.git  # Needed for MOPAC
     - -e ..[test]
