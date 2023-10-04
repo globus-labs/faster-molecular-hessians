@@ -26,6 +26,7 @@ dependencies:
 
   # Use Conda PyTorch to avoid OpenMP disagreement with other libraries
   - pytorch==2.0.*
+  - gpytorch==1.11.*
   - cpuonly
 
   - pip
