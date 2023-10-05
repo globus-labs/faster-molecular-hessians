@@ -92,6 +92,9 @@ def train_model(model: InducedKernelGPR, train_x: np.ndarray, train_y: np.ndarra
     # Iterate over the data multiple times
     losses = []
     for epoch in range(steps):
+        # Prepare the beginning of each epoch
+        opt.zero_grad()
+
         # TODO (wardlt): Provide training data in batches if it becomes too large
         # Predict on all configurations
         pred_y_per_atoms_flat = model(train_x)
@@ -147,8 +150,8 @@ class SOAPCalculator(Calculator):
         model: InducedKernelGPR = self.parameters['model']
         model.eval()  # Ensure we're in eval mode
         pred_energies_dist = model(desc)
-        pred_energies = pred_energies_dist.mean
-        pred_energy = torch.sum(pred_energies) * scale + offset
+        pred_energies = pred_energies_dist.mean * scale + offset
+        pred_energy = torch.sum(pred_energies)
 
         # Compute the forces
         #  See: https://singroup.github.io/dscribe/latest/tutorials/machine_learning/forces_and_energies.html
