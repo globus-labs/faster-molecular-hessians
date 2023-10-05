@@ -57,19 +57,29 @@ def test_train(descriptors, train_set):
 
 
 def test_calculator(descriptors, soap, train_set):
-    # Assemble and train for a few instances so that we get nonzero forces
+    # Scale the input and outputs
     train_y = np.array([a.get_potential_energy() for a in train_set])
-    train_y -= train_y.min()
+    train_y -= train_y.mean()
+
+    offset_x = descriptors.mean(axis=(0, 1))
+    scale_x = np.clip(descriptors.std(axis=(0, 1)), a_min=1e-6, a_max=None)
+    descriptors = (descriptors - offset_x) / scale_x
+
+    # Assemble and train for a few instances so that we get nonzero forces
     model = make_gpr_model(descriptors, 32)
     train_model(model, descriptors, train_y, 16)
 
     # Make the model
     calc = SOAPCalculator(
         model=model,
-        soap=soap
+        soap=soap,
+        desc_scaling=(offset_x, scale_x),
     )
+    energies = []
     for atoms in train_set:
         atoms.calc = calc
         forces = atoms.get_forces()
+        energies.append(atoms.get_potential_energy())
         numerical_forces = calc.calculate_numerical_forces(atoms)
         assert np.isclose(forces, numerical_forces, atol=1e-1).all()
+    assert np.std(energies) > 1e-6

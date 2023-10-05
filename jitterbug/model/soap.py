@@ -22,7 +22,6 @@ class InducedKernelGPR(ApproximateGP):
     Args:
         batch_x: Example input batch of descriptors
         inducing_x: Starting points for the reference points of the kernel
-        likelihood: Likelihood function used to describe the noise
         use_ard: Whether to employ a different length scale parameter for each descriptor,
             a technique known as Automatic Relevance Detection (ARD)
     """
@@ -42,6 +41,8 @@ class InducedKernelGPR(ApproximateGP):
 
 def make_gpr_model(train_descriptors: np.ndarray, num_inducing_points: int, use_ard_kernel: bool = False) -> InducedKernelGPR:
     """Make the GPR model for a certain atomic system
+
+    Assumes that the descriptors have already been scaled
 
     Args:
         train_descriptors: 3D array of all training points (num_configurations, num_atoms, num_descriptors)
@@ -73,6 +74,8 @@ def train_model(model: InducedKernelGPR,
                 verbose: bool = False) -> pd.DataFrame:
     """Train the kernel model over many iterations
 
+    Assumes that the descriptors have already been scaled
+
     Args:
         model: Model to be trained
         train_x: 3D array of all training points (num_configurations, num_atoms, num_descriptors)
@@ -80,6 +83,7 @@ def train_model(model: InducedKernelGPR,
         steps: Number of interactions over all training points
         batch_size: Number of conformers per batch
         learning_rate: Learning rate used for the optimizer
+        scaler: Tool used to transform data before training
         verbose: Whether to display a progress bar
     Returns:
         Mean loss over each iteration
@@ -100,7 +104,10 @@ def train_model(model: InducedKernelGPR,
     model.train()
 
     # Define the optimizer and loss function
-    opt = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    opt = torch.optim.Adam([
+        {'params': model.parameters()},
+        {'params': likelihood.parameters()}
+    ], lr=learning_rate)
     mll = VariationalELBO(likelihood, model, num_data=train_y.shape[0])
 
     # Iterate over the data multiple times
@@ -146,7 +153,9 @@ class SOAPCalculator(Calculator):
     Keyword Args:
         model (InducedKernelGPR): A machine learning model which takes descriptors as inputs
         soap (SOAP): Tool used to compute the descriptors
-        scaling (tuple[float, float]): A offset and factor with which to adjust the energy per atom predictions,
+        energy_scaling (tuple[np.ndarray, np.ndarray]): A offset and factor with which to adjust the energy per atom predictions,
+            which are typically he mean and standard deviation of energy per atom across the training set.
+        energy_scaling (tuple[float, float]): A offset and factor with which to adjust the energy per atom predictions,
             which are typically he mean and standard deviation of energy per atom across the training set.
     """
 
@@ -154,26 +163,34 @@ class SOAPCalculator(Calculator):
     default_parameters = {
         'model': None,
         'soap': None,
-        'scaling': (0., 1.)
+        'desc_scaling': (0., 1.),
+        'energy_scaling': (0., 1.)
     }
 
     def calculate(self, atoms=None, properties=('energy', 'forces', 'energies'),
                   system_changes=all_changes):
         # Compute the descriptors for the atoms
         d_desc_d_pos, desc = self.parameters['soap'].derivatives(atoms, attach=True)
+
+        # Scale the descriptors
+        offset, scale = self.parameters['desc_scaling']
+        desc = (desc - offset) / scale
+        d_desc_d_pos /= scale
+
+        # Convert to pytorch
         desc = torch.from_numpy(desc.astype(np.float32))
         desc.requires_grad = True
         d_desc_d_pos = torch.from_numpy(d_desc_d_pos.astype(np.float32))
 
         # Run inference
-        offset, scale = self.parameters['scaling']
+        offset, scale = self.parameters['energy_scaling']
         model: InducedKernelGPR = self.parameters['model']
         model.eval()  # Ensure we're in eval mode
         pred_energies_dist = model(desc)
         pred_energies = pred_energies_dist.mean * scale + offset
         pred_energy = torch.sum(pred_energies)
-        self.results['energy'] = pred_energy.detach().numpy()
-        self.results['energies'] = pred_energy.detach().numpy()
+        self.results['energy'] = pred_energy.item()
+        self.results['energies'] = pred_energies.detach().numpy()
 
         if 'forces' in properties:
             # Compute the forces
