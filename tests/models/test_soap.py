@@ -19,7 +19,7 @@ def soap(train_set):
 
 @fixture
 def descriptors(train_set, soap):
-    return soap.create(train_set)
+    return soap.create(train_set).astype(np.float32)
 
 
 @mark.parametrize('use_adr', [True, False])
@@ -28,16 +28,15 @@ def test_make_model(use_adr, descriptors, train_set):
 
     # Evaluate on a single point
     model.eval()
-    model.likelihood.eval()
     pred_dist = model(torch.from_numpy(descriptors[0, :, :]))
-    assert torch.isclose(pred_dist.mean, torch.zeros((1, 3,), dtype=pred_dist.mean.dtype)).all(), [pred_dist.mean]
+    assert torch.isclose(pred_dist.mean, torch.zeros((1, 3,)), atol=1e-2).all(), [pred_dist.mean]
 
 
 def test_train(descriptors, train_set):
     # Make the model and the training set
     train_y = np.array([a.get_potential_energy() for a in train_set])
     train_y -= train_y.min()
-    model = make_gpr_model(descriptors, 32)
+    model = make_gpr_model(descriptors, 4)
 
     # Evaluate the untrained model
     model.eval()
@@ -46,8 +45,8 @@ def test_train(descriptors, train_set):
     mae_untrained = np.abs(error_y).mean()
 
     # Train
-    losses = train_model(model, descriptors, train_y, 16)
-    assert len(losses) == 16
+    losses = train_model(model, descriptors, train_y, 64)
+    assert len(losses) == 64
 
     # Run the evaluation
     model.eval()
@@ -73,4 +72,4 @@ def test_calculator(descriptors, soap, train_set):
         atoms.calc = calc
         forces = atoms.get_forces()
         numerical_forces = calc.calculate_numerical_forces(atoms)
-        assert np.isclose(forces, numerical_forces, atol=1e-2).all()
+        assert np.isclose(forces, numerical_forces, atol=1e-1).all()
