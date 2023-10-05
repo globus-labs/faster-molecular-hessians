@@ -3,18 +3,22 @@ import torch
 from dscribe.descriptors.soap import SOAP
 from pytest import mark, fixture
 
-from jitterbug.model.soap import make_gpr_model, train_model
+from jitterbug.model.soap import make_gpr_model, train_model, SOAPCalculator
 
 
 @fixture
-def descriptors(train_set):
+def soap(train_set):
     species = sorted(set(sum([a.get_chemical_symbols() for a in train_set], [])))
-    soap = SOAP(
+    return SOAP(
         species=species,
         r_cut=4.,
         n_max=4,
         l_max=4,
     )
+
+
+@fixture
+def descriptors(train_set, soap):
     return soap.create(train_set)
 
 
@@ -51,3 +55,22 @@ def test_train(descriptors, train_set):
     error_y = pred_y.mean.sum(dim=1).detach().numpy() - train_y
     mae_trained = np.abs(error_y).mean()
     assert mae_trained < mae_untrained
+
+
+def test_calculator(descriptors, soap, train_set):
+    # Assemble and train for a few instances so that we get nonzero forces
+    train_y = np.array([a.get_potential_energy() for a in train_set])
+    train_y -= train_y.min()
+    model = make_gpr_model(descriptors, 32)
+    train_model(model, descriptors, train_y, 16)
+
+    # Make the model
+    calc = SOAPCalculator(
+        model=model,
+        soap=soap
+    )
+    for atoms in train_set:
+        atoms.calc = calc
+        forces = atoms.get_forces()
+        numerical_forces = calc.calculate_numerical_forces(atoms)
+        assert np.isclose(forces, numerical_forces, atol=1e-2).all()

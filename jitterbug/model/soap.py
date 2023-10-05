@@ -1,5 +1,6 @@
 """Create a Gaussian-process-regression based model which uses SOAP features"""
 import pandas as pd
+from ase.calculators.calculator import Calculator, all_changes
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from gpytorch.models import ExactGP
 from gpytorch.means import ConstantMean
@@ -85,6 +86,7 @@ def train_model(model: InducedKernelGPR, train_x: np.ndarray, train_y: np.ndarra
     # Iterate over the data multiple times
     losses = []
     for epoch in range(steps):
+        # TODO (wardlt): Provide training data in batches if it becomes too large
         # Predict on all configurations
         pred_y_per_atoms_flat = model(train_x)
 
@@ -107,3 +109,46 @@ def train_model(model: InducedKernelGPR, train_x: np.ndarray, train_y: np.ndarra
         opt.step()
 
     return pd.DataFrame({'loss': losses})
+
+
+class SOAPCalculator(Calculator):
+    """Calculator which uses a GPR model trained using SOAP descriptors"""
+
+    implemented_properties = ['energy', 'forces', 'energies']
+    default_parameters = {
+        'model': None,
+        'soap': None
+    }
+
+    def calculate(self, atoms=None, properties=('energy', 'forces', 'energies'),
+                  system_changes=all_changes):
+        # Compute the descriptors for the atoms
+        d_desc_d_pos, desc = self.parameters['soap'].derivatives(atoms, attach=True)
+        desc = torch.from_numpy(desc)
+        desc.requires_grad = True
+        d_desc_d_pos = torch.from_numpy(d_desc_d_pos)
+
+        # Run inference
+        model: InducedKernelGPR = self.parameters['model']
+        model.eval()  # Ensure we're in eval mode
+        pred_energies_dist = model(desc)
+        pred_energies = pred_energies_dist.mean
+        pred_energy = torch.sum(pred_energies)
+
+        # Compute the forces
+        #  See: https://singroup.github.io/dscribe/latest/tutorials/machine_learning/forces_and_energies.html
+        # Derivatives for the descriptors are for each center (which is the input to the model) with respect to each atomic coordinate changing.
+        # Energy is summed over the contributions from each center.
+        # The total force is therefore a sum over the effect of an atom moving on all centers
+        d_energy_d_desc = torch.autograd.grad(
+            outputs=pred_energy,
+            inputs=desc,
+            grad_outputs=torch.ones_like(pred_energy),
+        )[0]  # Derivative of the energy with respect to the descriptors for each center
+        d_energy_d_center_d_pos = torch.einsum('ijkl,il->ijk', d_desc_d_pos, d_energy_d_desc)  # Derivative for each center with respect to each atom
+        pred_forces = -d_energy_d_center_d_pos.sum(dim=0)  # Total effect on each center from each atom
+
+        # Store the results
+        self.results['forces'] = pred_forces.detach().numpy()
+        self.results['energy'] = pred_energy.detach().numpy()
+        self.results['energies'] = pred_energy.detach().numpy()
