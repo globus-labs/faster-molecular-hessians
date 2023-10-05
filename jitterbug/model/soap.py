@@ -15,12 +15,20 @@ class InducedKernelGPR(ExactGP):
     """Gaussian process regression model with an induced kernel
 
     Predicts the energy for each atom as a function of its descriptors
+
+    Args:
+        batch_x: Example input batch of descriptors
+        inducing_x: Starting points for the reference points of the kernel
+        likelihood: Likelihood function used to describe the noise
+        use_ard: Whether to employ a different length scale parameter for each descriptor,
+            a technique known as Automatic Relevance Detection (ARD)
     """
 
-    def __init__(self, batch_x: torch.Tensor, batch_y: torch.Tensor, inducing_x: torch.Tensor, likelihood: GaussianLikelihood, use_adr: bool):
+    def __init__(self, batch_x: torch.Tensor, inducing_x: torch.Tensor, likelihood: GaussianLikelihood, use_ard: bool):
+        batch_y = torch.zeros(batch_x.shape[0], dtype=batch_x.dtype)
         super().__init__(batch_x, batch_y, likelihood)
         self.mean_module = ConstantMean()
-        self.base_covar_module = ScaleKernel(RBFKernel(has_lengthscale=True, ard_num_dims=batch_x.shape[-1] if use_adr else None))
+        self.base_covar_module = ScaleKernel(RBFKernel(has_lengthscale=True, ard_num_dims=batch_x.shape[-1] if use_ard else None))
         self.covar_module = InducingPointKernel(self.base_covar_module, inducing_points=inducing_x.clone(), likelihood=likelihood)
 
     def forward(self, x) -> MultivariateNormal:
@@ -29,13 +37,13 @@ class InducedKernelGPR(ExactGP):
         return MultivariateNormal(mean_x, covar_x)
 
 
-def make_gpr_model(train_descriptors: np.ndarray, num_inducing_points: int, use_adr_kernel: bool = False) -> InducedKernelGPR:
+def make_gpr_model(train_descriptors: np.ndarray, num_inducing_points: int, use_ard_kernel: bool = False) -> InducedKernelGPR:
     """Make the GPR model for a certain atomic system
 
     Args:
         train_descriptors: 3D array of all training points (num_configurations, num_atoms, num_descriptors)
         num_inducing_points: Number of inducing points to use in the kernel. More points, more complex model
-        use_adr_kernel: Whether to use a different length scale parameter for each descriptor
+        use_ard_kernel: Whether to use a different length scale parameter for each descriptor
     Returns:
         Model which can predict energy given descriptors for a single configuration
     """
@@ -46,13 +54,11 @@ def make_gpr_model(train_descriptors: np.ndarray, num_inducing_points: int, use_
     inducing_points = descriptors[inducing_inds, :]
 
     # Make the model
-    #  TODO (wardlt): Consider making a batch size of more than one. Do we do that by just supplying all of the training data
-    batch_y = torch.zeros(descriptors.shape[0])  # Use a mean of zero for the training points
+    #  TODO (wardlt): Consider making a batch size of more than one. We currently use the entire training set in a single batch
     return InducedKernelGPR(
         batch_x=torch.from_numpy(descriptors),
-        batch_y=batch_y,  # Returns a scalar for each point
         inducing_x=torch.from_numpy(inducing_points),
-        use_adr=use_adr_kernel,
+        use_ard=use_ard_kernel,
         likelihood=GaussianLikelihood()
     )
 
@@ -67,7 +73,7 @@ def train_model(model: InducedKernelGPR, train_x: np.ndarray, train_y: np.ndarra
         steps: Number of interactions over all training points
         learning_rate: Learning rate used for the optimizer
     Returns:
-        Mean loss over all iterations
+        Mean loss over each iteration
     """
 
     # Convert the data to numpy
@@ -112,12 +118,20 @@ def train_model(model: InducedKernelGPR, train_x: np.ndarray, train_y: np.ndarra
 
 
 class SOAPCalculator(Calculator):
-    """Calculator which uses a GPR model trained using SOAP descriptors"""
+    """Calculator which uses a GPR model trained using SOAP descriptors
+
+    Args:
+        model (InducedKernelGPR): A machine learning model which takes descriptors as inputs
+        soap (SOAP): Tool used to compute the descriptors
+        scaling (tuple[float, float]): A offset and factor with which to adjust the energy per atom predictions,
+            which are typically he mean and standard deviation of energy per atom across the training set.
+    """
 
     implemented_properties = ['energy', 'forces', 'energies']
     default_parameters = {
         'model': None,
-        'soap': None
+        'soap': None,
+        'scaling': (0., 1.)
     }
 
     def calculate(self, atoms=None, properties=('energy', 'forces', 'energies'),
@@ -129,11 +143,12 @@ class SOAPCalculator(Calculator):
         d_desc_d_pos = torch.from_numpy(d_desc_d_pos)
 
         # Run inference
+        offset, scale = self.parameters['scaling']
         model: InducedKernelGPR = self.parameters['model']
         model.eval()  # Ensure we're in eval mode
         pred_energies_dist = model(desc)
         pred_energies = pred_energies_dist.mean
-        pred_energy = torch.sum(pred_energies)
+        pred_energy = torch.sum(pred_energies) * scale + offset
 
         # Compute the forces
         #  See: https://singroup.github.io/dscribe/latest/tutorials/machine_learning/forces_and_energies.html
@@ -146,7 +161,7 @@ class SOAPCalculator(Calculator):
             grad_outputs=torch.ones_like(pred_energy),
         )[0]  # Derivative of the energy with respect to the descriptors for each center
         d_energy_d_center_d_pos = torch.einsum('ijkl,il->ijk', d_desc_d_pos, d_energy_d_desc)  # Derivative for each center with respect to each atom
-        pred_forces = -d_energy_d_center_d_pos.sum(dim=0)  # Total effect on each center from each atom
+        pred_forces = -d_energy_d_center_d_pos.sum(dim=0) * scale # Total effect on each center from each atom
 
         # Store the results
         self.results['forces'] = pred_forces.detach().numpy()

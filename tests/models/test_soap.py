@@ -23,8 +23,8 @@ def descriptors(train_set, soap):
 
 
 @mark.parametrize('use_adr', [True, False])
-def test_make_model(use_adr, descriptors):
-    model = make_gpr_model(descriptors, 4, use_adr_kernel=use_adr)
+def test_make_model(use_adr, descriptors, train_set):
+    model = make_gpr_model(descriptors, 4, use_ard_kernel=use_adr)
 
     # Evaluate on a single point
     model.eval()
