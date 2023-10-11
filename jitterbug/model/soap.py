@@ -1,12 +1,15 @@
 """Create a Gaussian-process-regression based model which uses SOAP features"""
+from typing import Union
+
 from ase.calculators.calculator import Calculator, all_changes
+from gpytorch.metrics import mean_squared_error
 from gpytorch.mlls import VariationalELBO
 from gpytorch.models import ApproximateGP
 from gpytorch.means import ConstantMean
 from gpytorch.kernels import ScaleKernel, RBFKernel
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.distributions import MultivariateNormal
-from gpytorch.variational import CholeskyVariationalDistribution, VariationalStrategy
+from gpytorch.variational import VariationalStrategy, DeltaVariationalDistribution
 from torch.utils.data import TensorDataset, DataLoader
 from tqdm import tqdm
 import pandas as pd
@@ -27,7 +30,7 @@ class InducedKernelGPR(ApproximateGP):
     """
 
     def __init__(self, batch_x: torch.Tensor, inducing_x: torch.Tensor, use_ard: bool):
-        variational_distribution = CholeskyVariationalDistribution(inducing_x.size(0))
+        variational_distribution = DeltaVariationalDistribution(inducing_x.size(0))
         variational_strategy = VariationalStrategy(self, inducing_x, variational_distribution, learn_inducing_locations=True)
         super().__init__(variational_strategy)
         self.mean_module = ConstantMean()
@@ -71,6 +74,7 @@ def train_model(model: InducedKernelGPR,
                 steps: int,
                 batch_size: int = 4,
                 learning_rate: float = 0.01,
+                device: Union[str, torch.device] = 'cpu',
                 verbose: bool = False) -> pd.DataFrame:
     """Train the kernel model over many iterations
 
@@ -83,7 +87,7 @@ def train_model(model: InducedKernelGPR,
         steps: Number of interactions over all training points
         batch_size: Number of conformers per batch
         learning_rate: Learning rate used for the optimizer
-        scaler: Tool used to transform data before training
+        device: Which device to use for training
         verbose: Whether to display a progress bar
     Returns:
         Mean loss over each iteration
@@ -103,6 +107,9 @@ def train_model(model: InducedKernelGPR,
     likelihood.train()
     model.train()
 
+    # Move the model over to the target device
+    model.to(device)
+
     # Define the optimizer and loss function
     opt = torch.optim.Adam([
         {'params': model.parameters()},
@@ -112,12 +119,16 @@ def train_model(model: InducedKernelGPR,
 
     # Iterate over the data multiple times
     losses = []
+    mse_losses = []
     noises = []
     for _ in tqdm(range(steps), disable=not verbose, leave=False):
         epoch_loss = 0
+        epoch_mse_loss = 0
         for batch_x, batch_y in loader:
-            # Prepare the beginning of each batch
+            # Prepare at the beginning of each batch
             opt.zero_grad()
+            batch_x = batch_x.to(device)
+            batch_y = batch_y.to(device)
 
             # Predict on all configurations
             batch_x = torch.reshape(batch_x, (-1, batch_x.shape[-1]))  # Flatten from (n_confs, n_atoms, n_desc) -> (n_confs * n_atoms, n_desc)
@@ -138,13 +149,19 @@ def train_model(model: InducedKernelGPR,
 
             # Compute loss and optimize
             loss = -mll(pred_y_dist, batch_y)
+            mse_loss = mean_squared_error(pred_y_dist, batch_y)
             loss.backward()
             opt.step()
             epoch_loss += loss.item()
+            epoch_mse_loss += mse_loss.item()
 
         losses.append(epoch_loss)
+        mse_losses.append(epoch_mse_loss)
         noises.append(likelihood.noise.item())
-    return pd.DataFrame({'loss': losses, 'noise': noises})
+
+    # Pull the model back off the GPU
+    model.to('cpu')
+    return pd.DataFrame({'loss': losses, 'mse_loss': mse_losses, 'noise': noises})
 
 
 class SOAPCalculator(Calculator):
@@ -153,10 +170,11 @@ class SOAPCalculator(Calculator):
     Keyword Args:
         model (InducedKernelGPR): A machine learning model which takes descriptors as inputs
         soap (SOAP): Tool used to compute the descriptors
-        energy_scaling (tuple[np.ndarray, np.ndarray]): A offset and factor with which to adjust the energy per atom predictions,
+        desc_scaling (tuple[np.ndarray, np.ndarray]): A offset and factor with which to adjust the energy per atom predictions,
             which are typically he mean and standard deviation of energy per atom across the training set.
         energy_scaling (tuple[float, float]): A offset and factor with which to adjust the energy per atom predictions,
             which are typically he mean and standard deviation of energy per atom across the training set.
+        device (str | torch.device): Device to use for inference
     """
 
     implemented_properties = ['energy', 'forces', 'energies']
@@ -164,7 +182,8 @@ class SOAPCalculator(Calculator):
         'model': None,
         'soap': None,
         'desc_scaling': (0., 1.),
-        'energy_scaling': (0., 1.)
+        'energy_scaling': (0., 1.),
+        'device': 'cpu'
     }
 
     def calculate(self, atoms=None, properties=('energy', 'forces', 'energies'),
@@ -182,15 +201,20 @@ class SOAPCalculator(Calculator):
         desc.requires_grad = True
         d_desc_d_pos = torch.from_numpy(d_desc_d_pos.astype(np.float32))
 
+        # Move the model to device if need be
+        model: InducedKernelGPR = self.parameters['model']
+        device = self.parameters['device']
+        model.to(device)
+
         # Run inference
         offset, scale = self.parameters['energy_scaling']
-        model: InducedKernelGPR = self.parameters['model']
         model.eval()  # Ensure we're in eval mode
+        desc = desc.to(device)
         pred_energies_dist = model(desc)
         pred_energies = pred_energies_dist.mean * scale + offset
         pred_energy = torch.sum(pred_energies)
         self.results['energy'] = pred_energy.item()
-        self.results['energies'] = pred_energies.detach().numpy()
+        self.results['energies'] = pred_energies.detach().cpu().numpy()
 
         if 'forces' in properties:
             # Compute the forces
@@ -207,4 +231,7 @@ class SOAPCalculator(Calculator):
             pred_forces = -d_energy_d_center_d_pos.sum(dim=0) * scale  # Total effect on each center from each atom
 
             # Store the results
-            self.results['forces'] = pred_forces.detach().numpy()
+            self.results['forces'] = pred_forces.detach().cpu().numpy()
+
+        # Move the model back to CPU memory
+        model.to('cpu')
