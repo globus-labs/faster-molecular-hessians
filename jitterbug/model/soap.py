@@ -2,14 +2,6 @@
 from typing import Union
 
 from ase.calculators.calculator import Calculator, all_changes
-from gpytorch.metrics import mean_squared_error
-from gpytorch.mlls import VariationalELBO
-from gpytorch.models import ApproximateGP
-from gpytorch.means import ConstantMean
-from gpytorch.kernels import ScaleKernel, RBFKernel
-from gpytorch.likelihoods import GaussianLikelihood
-from gpytorch.distributions import MultivariateNormal
-from gpytorch.variational import VariationalStrategy, DeltaVariationalDistribution
 from torch.utils.data import TensorDataset, DataLoader
 from tqdm import tqdm
 import pandas as pd
@@ -17,29 +9,34 @@ import numpy as np
 import torch
 
 
-class InducedKernelGPR(ApproximateGP):
+class InducedKernelGPR(torch.nn.Module):
     """Gaussian process regression model with an induced kernel
 
     Predicts the energy for each atom as a function of its descriptors
 
     Args:
-        batch_x: Example input batch of descriptors
         inducing_x: Starting points for the reference points of the kernel
         use_ard: Whether to employ a different length scale parameter for each descriptor,
             a technique known as Automatic Relevance Detection (ARD)
     """
 
-    def __init__(self, batch_x: torch.Tensor, inducing_x: torch.Tensor, use_ard: bool):
-        variational_distribution = DeltaVariationalDistribution(inducing_x.size(0))
-        variational_strategy = VariationalStrategy(self, inducing_x, variational_distribution, learn_inducing_locations=True)
-        super().__init__(variational_strategy)
-        self.mean_module = ConstantMean()
-        self.covar_module = ScaleKernel(RBFKernel(has_lengthscale=True, ard_num_dims=batch_x.shape[-1] if use_ard else None))
+    def __init__(self, inducing_x: torch.Tensor, use_ard: bool):
+        super().__init__()
+        n_points, n_desc = inducing_x.shape
+        self.inducing_x = torch.nn.Parameter(inducing_x.clone())
+        self.alpha = torch.nn.Parameter(torch.empty((n_points,), dtype=inducing_x.dtype))
+        torch.nn.init.normal_(self.alpha)
+        self.lengthscales = torch.nn.Parameter(-torch.ones((n_desc,), dtype=inducing_x.dtype) if use_ard else -torch.ones((1,), dtype=inducing_x.dtype))
 
-    def forward(self, x) -> MultivariateNormal:
-        mean_x = self.mean_module(x)
-        covar_x = self.covar_module(x)
-        return MultivariateNormal(mean_x, covar_x)
+    def forward(self, x) -> torch.Tensor:
+        # Compute an RBF kernel
+        lengthscales = torch.exp(self.lengthscales)
+        diff_sq = torch.pow(x[None, :, :] - self.inducing_x[:, None, :], 2) / lengthscales
+        diff = diff_sq.sum(axis=-1)  # Sum along the descriptor axis
+        esd = torch.exp(-diff)
+
+        # Return the sum
+        return torch.tensordot(self.alpha, esd, dims=([0], [0]))
 
 
 def make_gpr_model(train_descriptors: np.ndarray, num_inducing_points: int, use_ard_kernel: bool = False) -> InducedKernelGPR:
@@ -62,7 +59,6 @@ def make_gpr_model(train_descriptors: np.ndarray, num_inducing_points: int, use_
 
     # Make the model
     return InducedKernelGPR(
-        batch_x=torch.from_numpy(descriptors),
         inducing_x=torch.from_numpy(inducing_points),
         use_ard=use_ard_kernel,
     )
@@ -102,28 +98,20 @@ def train_model(model: InducedKernelGPR,
     dataset = TensorDataset(train_x, train_y)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
-    # Convert the model to training model
-    likelihood = GaussianLikelihood()
-    likelihood.train()
+    # Convert the model to training mode on the device
     model.train()
-
-    # Move the model over to the target device
     model.to(device)
 
     # Define the optimizer and loss function
     opt = torch.optim.Adam([
         {'params': model.parameters()},
-        {'params': likelihood.parameters()}
     ], lr=learning_rate)
-    mll = VariationalELBO(likelihood, model, num_data=train_y.shape[0])
+    loss = torch.nn.MSELoss()
 
     # Iterate over the data multiple times
     losses = []
-    mse_losses = []
-    noises = []
     for _ in tqdm(range(steps), disable=not verbose, leave=False):
         epoch_loss = 0
-        epoch_mse_loss = 0
         for batch_x, batch_y in loader:
             # Prepare at the beginning of each batch
             opt.zero_grad()
@@ -135,33 +123,23 @@ def train_model(model: InducedKernelGPR,
             pred_y_per_atoms_flat = model(batch_x)
 
             # Get the mean sum for each atom
-            pred_y_per_atoms = torch.reshape(pred_y_per_atoms_flat.mean, (batch_size, n_atoms))
-            pred_y_mean = torch.sum(pred_y_per_atoms, dim=1)
+            pred_y_per_atoms = torch.reshape(pred_y_per_atoms_flat, (batch_size, n_atoms))
+            pred_y = torch.sum(pred_y_per_atoms, dim=1)
 
-            # The covariance matrix of those sums, assuming they are uncorrelated with each other (they are not)
-            pred_y_covar_flat = pred_y_per_atoms_flat.covariance_matrix
-            pred_y_covar_grouped_by_conf = pred_y_covar_flat.reshape((batch_size, n_atoms, batch_size, n_atoms))
-            pred_y_covar = torch.sum(pred_y_covar_grouped_by_conf, dim=(1, 3))
-            pred_y_covar = torch.diag(torch.diag(pred_y_covar))  # Make it diagonal
+            # Compute loss and propagate
+            batch_loss = loss(pred_y, batch_y)
+            if torch.isnan(batch_loss):
+                raise ValueError('NaN loss')
+            batch_loss.backward()
 
-            # Turn them in to a distribution, and use that to compute a loss function
-            pred_y_dist = MultivariateNormal(mean=pred_y_mean, covariance_matrix=pred_y_covar)
-
-            # Compute loss and optimize
-            loss = -mll(pred_y_dist, batch_y)
-            mse_loss = mean_squared_error(pred_y_dist, batch_y)
-            loss.backward()
             opt.step()
-            epoch_loss += loss.item()
-            epoch_mse_loss += mse_loss.item()
+            epoch_loss += batch_loss.item()
 
         losses.append(epoch_loss)
-        mse_losses.append(epoch_mse_loss)
-        noises.append(likelihood.noise.item())
 
     # Pull the model back off the GPU
     model.to('cpu')
-    return pd.DataFrame({'loss': losses, 'mse_loss': mse_losses, 'noise': noises})
+    return pd.DataFrame({'loss': losses})
 
 
 class SOAPCalculator(Calculator):
@@ -211,7 +189,7 @@ class SOAPCalculator(Calculator):
         model.eval()  # Ensure we're in eval mode
         desc = desc.to(device)
         pred_energies_dist = model(desc)
-        pred_energies = pred_energies_dist.mean * scale + offset
+        pred_energies = pred_energies_dist * scale + offset
         pred_energy = torch.sum(pred_energies)
         self.results['energy'] = pred_energy.item()
         self.results['energies'] = pred_energies.detach().cpu().numpy()
@@ -227,6 +205,7 @@ class SOAPCalculator(Calculator):
                 inputs=desc,
                 grad_outputs=torch.ones_like(pred_energy),
             )[0]  # Derivative of the energy with respect to the descriptors for each center
+            d_desc_d_pos = d_desc_d_pos.to(device)
             d_energy_d_center_d_pos = torch.einsum('ijkl,il->ijk', d_desc_d_pos, d_energy_d_desc)  # Derivative for each center with respect to each atom
             pred_forces = -d_energy_d_center_d_pos.sum(dim=0) * scale  # Total effect on each center from each atom
 

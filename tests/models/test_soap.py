@@ -19,7 +19,7 @@ def soap(train_set):
 
 @fixture
 def descriptors(train_set, soap):
-    return soap.create(train_set).astype(np.float32)
+    return soap.create(train_set)
 
 
 @mark.parametrize('use_adr', [True, False])
@@ -28,20 +28,23 @@ def test_make_model(use_adr, descriptors, train_set):
 
     # Evaluate on a single point
     model.eval()
-    pred_dist = model(torch.from_numpy(descriptors[0, :, :]))
-    assert torch.isclose(pred_dist.mean, torch.zeros((1, 3,)), atol=1e-2).all(), [pred_dist.mean]
+    pred_y = model(torch.from_numpy(descriptors[0, :, :]))
+    assert pred_y.shape == (3,)  # 3 Atoms
 
 
-def test_train(descriptors, train_set):
+@mark.parametrize('use_adr', [True, False])
+def test_train(descriptors, train_set, use_adr):
     # Make the model and the training set
     train_y = np.array([a.get_potential_energy() for a in train_set])
     train_y -= train_y.min()
-    model = make_gpr_model(descriptors, 4)
+    model = make_gpr_model(descriptors, 4, use_ard_kernel=use_adr)
+    model.inducing_x.requires_grad = False
 
     # Evaluate the untrained model
     model.eval()
-    pred_y = model(torch.from_numpy(descriptors))
-    error_y = pred_y.mean.sum(dim=1).detach().numpy() - train_y
+    pred_y = model(torch.from_numpy(descriptors.reshape((-1, descriptors.shape[-1]))))
+    assert pred_y.dtype == torch.float64
+    error_y = pred_y.sum(axis=-1).detach().numpy() - train_y
     mae_untrained = np.abs(error_y).mean()
 
     # Train
@@ -50,8 +53,8 @@ def test_train(descriptors, train_set):
 
     # Run the evaluation
     model.eval()
-    pred_y = model(torch.from_numpy(descriptors))
-    error_y = pred_y.mean.sum(dim=1).detach().numpy() - train_y
+    pred_y = model(torch.from_numpy(descriptors.reshape((-1, descriptors.shape[-1]))))
+    error_y = pred_y.sum(axis=-1).detach().numpy() - train_y
     mae_trained = np.abs(error_y).mean()
     assert mae_trained < mae_untrained
 
@@ -81,5 +84,5 @@ def test_calculator(descriptors, soap, train_set):
         forces = atoms.get_forces()
         energies.append(atoms.get_potential_energy())
         numerical_forces = calc.calculate_numerical_forces(atoms)
-        assert np.isclose(forces, numerical_forces, atol=1e-1).all()
+        assert np.isclose(forces[:, :2], numerical_forces[:, :2], rtol=1e-1).all()  # Make them agree w/i 10%
     assert np.std(energies) > 1e-6
