@@ -1,12 +1,12 @@
 """Test for a MBTR-based energy model"""
 import numpy as np
 
-from jitterbug.model.mbtr import MBTRCalculator, MBTREnergyModel
+from jitterbug.model.dscribe.single import DScribeGlobalCalculator, DScribeGlobalEnergyModel
 
 
 def test_model(train_set):
     # Create then fit the model
-    calc = MBTRCalculator()
+    calc = DScribeGlobalCalculator()
     calc.train(train_set)
 
     # Predict the energy (we should be close!)
@@ -22,8 +22,8 @@ def test_model(train_set):
 
 def test_hessian(train_set):
     """See if we can compute the Hessian"""
-    calc = MBTRCalculator()
-    model = MBTREnergyModel(calc, train_set[0])
+    calc = DScribeGlobalCalculator()
+    model = DScribeGlobalEnergyModel(calc, train_set[0])
 
     # Run the fitting
     hess_model = model.train(train_set)

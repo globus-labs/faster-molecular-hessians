@@ -1,10 +1,10 @@
-"""Learn a potential energy surface with the MBTR representation
+"""Models which use a single vector to describe a molecule.
 
-MBTR is an easy route for learning a forcefield because it represents
-a molecule as a single vector, which means we can case the learning
-problem as a simple "molecule->energy" learning problem. Other methods,
-such as SOAP, provided atomic-level features that must require an
+Such approaches, such as MBTR, present a simple "molecule->energy" learning problem.
+Other methods, such as SOAP, provided atomic-level features that must require an
 extra step "molecule->atoms->energy/atom->energy".
+
+We train the models using sklearn for this example.
 """
 from shutil import rmtree
 
@@ -18,8 +18,8 @@ import numpy as np
 from jitterbug.model.base import EnergyModel
 
 
-class MBTRCalculator(Calculator):
-    """A learnable forcefield based on GPR and fingerprints computed using DScribe"""
+class DScribeGlobalCalculator(Calculator):
+    """A learnable forcefield based on global fingerprints computed using DScribe"""
 
     implemented_properties = ['energy', 'forces']
     default_parameters = {
@@ -69,7 +69,7 @@ class MBTRCalculator(Calculator):
         self.parameters['model'].fit(desc, energies)
 
 
-class MBTREnergyModel(EnergyModel):
+class DScribeGlobalEnergyModel(EnergyModel):
     """Use the MBTR representation to model the potential energy surface
 
     Args:
@@ -77,16 +77,16 @@ class MBTREnergyModel(EnergyModel):
         reference: Reference structure at which we compute the Hessian
     """
 
-    def __init__(self, calc: MBTRCalculator, reference: Atoms):
+    def __init__(self, calc: DScribeGlobalCalculator, reference: Atoms):
         super().__init__()
         self.calc = calc
         self.reference = reference
 
-    def train(self, data: list[Atoms]) -> MBTRCalculator:
+    def train(self, data: list[Atoms]) -> DScribeGlobalCalculator:
         self.calc.train(data)
         return self.calc
 
-    def mean_hessian(self, model: MBTRCalculator) -> np.ndarray:
+    def mean_hessian(self, model: DScribeGlobalCalculator) -> np.ndarray:
         self.reference.calc = model
         try:
             vib = Vibrations(self.reference, name='mbtr-temp')

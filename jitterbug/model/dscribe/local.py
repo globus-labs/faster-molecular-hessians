@@ -1,4 +1,6 @@
-"""Create a Gaussian-process-regression based model which uses SOAP features"""
+"""Create a Gaussian-process-regression based model which uses features for each atom
+
+Builds the model using PyTorch so that one can come derivatives analytically."""
 from typing import Union
 
 from ase.calculators.calculator import Calculator, all_changes
@@ -142,12 +144,12 @@ def train_model(model: InducedKernelGPR,
     return pd.DataFrame({'loss': losses})
 
 
-class SOAPCalculator(Calculator):
+class DScribeLocalCalculator(Calculator):
     """Calculator which uses a GPR model trained using SOAP descriptors
 
     Keyword Args:
         model (InducedKernelGPR): A machine learning model which takes descriptors as inputs
-        soap (SOAP): Tool used to compute the descriptors
+        desc (DescriptorLocal): Tool used to compute the descriptors
         desc_scaling (tuple[np.ndarray, np.ndarray]): A offset and factor with which to adjust the energy per atom predictions,
             which are typically he mean and standard deviation of energy per atom across the training set.
         energy_scaling (tuple[float, float]): A offset and factor with which to adjust the energy per atom predictions,
@@ -158,7 +160,7 @@ class SOAPCalculator(Calculator):
     implemented_properties = ['energy', 'forces', 'energies']
     default_parameters = {
         'model': None,
-        'soap': None,
+        'desc': None,
         'desc_scaling': (0., 1.),
         'energy_scaling': (0., 1.),
         'device': 'cpu'
@@ -167,7 +169,7 @@ class SOAPCalculator(Calculator):
     def calculate(self, atoms=None, properties=('energy', 'forces', 'energies'),
                   system_changes=all_changes):
         # Compute the descriptors for the atoms
-        d_desc_d_pos, desc = self.parameters['soap'].derivatives(atoms, attach=True)
+        d_desc_d_pos, desc = self.parameters['desc'].derivatives(atoms, attach=True)
 
         # Scale the descriptors
         offset, scale = self.parameters['desc_scaling']
