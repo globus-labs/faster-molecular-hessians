@@ -1,14 +1,16 @@
-"""Create a Gaussian-process-regression based model which uses features for each atom
-
-Builds the model using PyTorch so that one can come derivatives analytically."""
-from typing import Union
+"""Create a PyTorch-based model which uses features for each atom"""
+from typing import Union, Optional, Callable
 
 from ase.calculators.calculator import Calculator, all_changes
+from dscribe.descriptors.descriptorlocal import DescriptorLocal
 from torch.utils.data import TensorDataset, DataLoader
+from ase import Atoms
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
 import torch
+
+from jitterbug.model.base import ASEEnergyModel
 
 
 class InducedKernelGPR(torch.nn.Module):
@@ -66,7 +68,7 @@ def make_gpr_model(train_descriptors: np.ndarray, num_inducing_points: int, use_
     )
 
 
-def train_model(model: InducedKernelGPR,
+def train_model(model: torch.nn.Module,
                 train_x: np.ndarray,
                 train_y: np.ndarray,
                 steps: int,
@@ -145,10 +147,10 @@ def train_model(model: InducedKernelGPR,
 
 
 class DScribeLocalCalculator(Calculator):
-    """Calculator which uses a GPR model trained using SOAP descriptors
+    """Calculator which uses descriptors for each atom and PyTorch to compute energy
 
     Keyword Args:
-        model (InducedKernelGPR): A machine learning model which takes descriptors as inputs
+        model (torch.nn.Module): A machine learning model which takes descriptors as inputs
         desc (DescriptorLocal): Tool used to compute the descriptors
         desc_scaling (tuple[np.ndarray, np.ndarray]): A offset and factor with which to adjust the energy per atom predictions,
             which are typically he mean and standard deviation of energy per atom across the training set.
@@ -182,7 +184,7 @@ class DScribeLocalCalculator(Calculator):
         d_desc_d_pos = torch.from_numpy(d_desc_d_pos.astype(np.float32))
 
         # Move the model to device if need be
-        model: InducedKernelGPR = self.parameters['model']
+        model: torch.nn.Module = self.parameters['model']
         device = self.parameters['device']
         model.to(device)
 
@@ -216,3 +218,56 @@ class DScribeLocalCalculator(Calculator):
 
         # Move the model back to CPU memory
         model.to('cpu')
+
+
+class DScribeLocalEnergyModel(ASEEnergyModel):
+    """Energy model based on DScribe atom-level descriptors
+
+    Trains an energy model using PyTorch
+
+    Args:
+        reference: Reference structure at which we compute the Hessian
+        descriptors: Tool used to compute descriptors
+        model_fn: Function used to create the model given descriptors for the training set
+        num_calculators: Number of models to use in ensemble
+        device: Device used for training
+        train_options: Options passed to the training function
+    """
+
+    def __init__(self,
+                 reference: Atoms,
+                 descriptors: DescriptorLocal,
+                 model_fn: Callable[[np.ndarray], torch.nn.Module],
+                 num_calculators: int,
+                 device: str = 'cpu',
+                 train_options: Optional[dict] = None):
+        super().__init__(reference, num_calculators)
+        self.descriptors = descriptors
+        self.model_fn = model_fn
+        self.device = device
+        self.train_options = train_options or {'steps': 4}
+
+    def train_calculator(self, data: list[Atoms]) -> Calculator:
+        # Train it using the user-provided options
+        train_x = self.descriptors.create(data)
+        offset_x = train_x.mean(axis=(0, 1))
+        scale_x = np.clip(train_x.std(axis=(0, 1)), a_min=1e-6, a_max=None)
+        train_x -= offset_x
+        train_x /= scale_x
+
+        train_y = np.array([a.get_potential_energy() for a in data])
+        scale_y, offset_y = np.std(train_y), np.mean(train_y)
+        train_y = (train_y - offset_y) / scale_y
+
+        # Make then train the model
+        model = self.model_fn(train_x)
+        train_model(model, train_x, train_y, device=self.device, **self.train_options)
+
+        # Make the calculator
+        return DScribeLocalCalculator(
+            model=model,
+            desc=self.descriptors,
+            desc_scaling=(offset_x, scale_x),
+            energy_scaling=(offset_y, scale_y),
+            device=self.device
+        )

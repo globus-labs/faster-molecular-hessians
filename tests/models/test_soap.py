@@ -3,7 +3,7 @@ import torch
 from dscribe.descriptors.soap import SOAP
 from pytest import mark, fixture
 
-from jitterbug.model.dscribe.local import make_gpr_model, train_model, DScribeLocalCalculator
+from jitterbug.model.dscribe.local import make_gpr_model, train_model, DScribeLocalCalculator, DScribeLocalEnergyModel
 
 
 @fixture
@@ -86,3 +86,27 @@ def test_calculator(descriptors, soap, train_set):
         numerical_forces = calc.calculate_numerical_forces(atoms, d=1e-4)
         assert np.isclose(forces[:, :2], numerical_forces[:, :2], rtol=5e-1).all()  # Make them agree w/i 50% (PES is not smooth)
     assert np.std(energies) > 1e-6
+
+
+def test_model(soap, train_set):
+    # Assemble the model
+    model = DScribeLocalEnergyModel(
+        reference=train_set[0],
+        descriptors=soap,
+        model_fn=lambda x: make_gpr_model(x, num_inducing_points=32),
+        num_calculators=4,
+    )
+
+    # Run the fitting
+    calcs = model.train(train_set)
+
+    # Test the mean hessian function
+    mean_hess = model.mean_hessian(calcs)
+    assert mean_hess.shape == (9, 9), 'Wrong shape'
+    assert np.isclose(mean_hess, mean_hess.T).all(), 'Not symmetric'
+
+    # Test the sampling
+    sampled_hess = model.sample_hessians(calcs, 128)
+    assert all(np.isclose(hess, hess.T).all() for hess in sampled_hess)
+    mean_sampled_hess = np.mean(sampled_hess, 0)
+    assert np.isclose(np.diag(mean_sampled_hess), np.diag(mean_hess), atol=5).mean() > 0.5  # Make sure most agree
