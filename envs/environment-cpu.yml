@@ -4,7 +4,6 @@ name: jitterbug
 channels:
   - defaults
   - conda-forge
-  - pytorch
   - conda-forge/label/libint_dev
 dependencies:
   - python==3.9.*
