@@ -58,6 +58,7 @@ def make_gpr_model(train_descriptors: np.ndarray, num_inducing_points: int, use_
 
     # Select a set of inducing points randomly
     descriptors = np.reshape(train_descriptors, (-1, train_descriptors.shape[-1]))
+    num_inducing_points = min(num_inducing_points, descriptors.shape[0])
     inducing_inds = np.random.choice(descriptors.shape[0], size=(num_inducing_points,), replace=False)
     inducing_points = descriptors[inducing_inds, :]
 
