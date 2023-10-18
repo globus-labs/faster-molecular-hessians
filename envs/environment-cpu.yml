@@ -26,10 +26,10 @@ dependencies:
 
   # Use Conda PyTorch to avoid OpenMP disagreement with other libraries
   - pytorch==2.0.*
-  - gpytorch==1.11.*
   - cpuonly
 
   - pip
   - pip:
     - git+https://gitlab.com/ase/ase.git  # Needed for MOPAC
+    - gpytorch==1.11.*
     - -e ..[test]
