@@ -29,6 +29,11 @@ jobs:
       run: |
         pip install flake8
         flake8 jitterbug tests
+    - name: Make sure notebooks are empty
+      run: |
+        nbo=$(nbstripout --dry-run notebooks/0_get-exact-answer.ipynb)
+        echo $nbo
+        [[ -n $nbo ]]  # Make sure the output is empty
     - name: Test with pytest
       run: pytest --cov=jitterbug --timeout=300 tests
     - name: Coveralls
