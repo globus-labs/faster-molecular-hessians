@@ -37,6 +37,7 @@ repository = "https://github.com/globus-labs/faster-molecular-hessians"
 
 [project.optional-dependencies]
 test = [
+    'nbstripout',  # Used as a pre-commit hook
     'flake8',
     'pytest',
     'pytest-forked',

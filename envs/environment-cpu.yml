@@ -24,8 +24,7 @@ dependencies:
   - dscribe==2.1.*
 
   # Use Conda PyTorch to avoid OpenMP disagreement with other libraries
-  - pytorch==2.0.*
-  - cpuonly
+  - pytorch==2.0.*=*cpu*
 
   - pip
   - pip:
