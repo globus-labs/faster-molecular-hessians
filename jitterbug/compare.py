@@ -2,8 +2,10 @@
 from dataclasses import dataclass
 
 import ase
+from ase import units
 import numpy as np
 from ase.vibrations import VibrationsData
+from pmutt.statmech import StatMech, presets
 
 
 @dataclass
@@ -12,9 +14,15 @@ class HessianQuality:
 
     # Thermodynamics
     zpe: float
-    """Zero point energy (eV)"""
+    """Zero point energy (kcal/mol)"""
     zpe_error: float
     """Different between the ZPE and the target one"""
+    cp: list[float]
+    """Heat capacity as a function of temperature (units: kcal/mol/K)"""
+    cp_error: list[float]
+    """Difference between known and approximate heat capacity as a function of temperature (units: kcal/mol/K)"""
+    temps: list[float]
+    """Temperatures at which Cp was evaluated (units: K)"""
 
     # Vibrations
     vib_freqs: list[float]
@@ -47,11 +55,22 @@ def compare_hessians(atoms: ase.Atoms, known_hessian: np.ndarray, approx_hessian
     freq_error = np.subtract(approx_freqs[is_real], known_freqs[is_real])
     freq_mae = np.abs(freq_error).mean()
 
+    # Compare the enthalpy and heat capacity
+    known_harm = StatMech(vib_wavenumbers=np.real(known_freqs[is_real]), atoms=atoms, symmetrynumber=1, **presets['harmonic'])
+    approx_harm = StatMech(vib_wavenumbers=np.real(approx_freqs[is_real]), atoms=atoms, symmetrynumber=1, **presets['harmonic'])
+
+    temps = np.linspace(1., 373, 128)
+    known_cp = np.array([known_harm.get_Cp('kcal/mol/K', T=t) for t in temps])
+    approx_cp = np.array([approx_harm.get_Cp('kcal/mol/K', T=t) for t in temps])
+
     # Assemble into a result object
     return HessianQuality(
-        zpe=approx_vibs.get_zero_point_energy(),
-        zpe_error=(approx_vibs.get_zero_point_energy() - known_vibs.get_zero_point_energy()),
+        zpe=approx_vibs.get_zero_point_energy() * units.mol / units.kcal,
+        zpe_error=(approx_vibs.get_zero_point_energy() - known_vibs.get_zero_point_energy()) * units.mol / units.kcal,
         vib_freqs=np.real(approx_freqs[is_real]).tolist(),
         vib_errors=np.abs(freq_error),
-        vib_mae=freq_mae
+        vib_mae=freq_mae,
+        cp=approx_cp.tolist(),
+        cp_error=(known_cp - approx_cp).tolist(),
+        temps=temps.tolist()
     )
