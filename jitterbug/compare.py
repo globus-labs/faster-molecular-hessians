@@ -21,6 +21,10 @@ class HessianQuality:
     """Heat capacity as a function of temperature (units: kcal/mol/K)"""
     cp_error: list[float]
     """Difference between known and approximate heat capacity as a function of temperature (units: kcal/mol/K)"""
+    h: list[float]
+    """Enthalpy as a function of temperature (units: kcal/mol)"""
+    h_error: list[float]
+    """Error between known and approximate enthalpy as a function of temperature (units: kcal/mol)"""
     temps: list[float]
     """Temperatures at which Cp was evaluated (units: K)"""
 
@@ -56,12 +60,15 @@ def compare_hessians(atoms: ase.Atoms, known_hessian: np.ndarray, approx_hessian
     freq_mae = np.abs(freq_error).mean()
 
     # Compare the enthalpy and heat capacity
+    #  TODO (wardlt): Might actually want to compute the symmetry number
     known_harm = StatMech(vib_wavenumbers=np.real(known_freqs[is_real]), atoms=atoms, symmetrynumber=1, **presets['harmonic'])
     approx_harm = StatMech(vib_wavenumbers=np.real(approx_freqs[is_real]), atoms=atoms, symmetrynumber=1, **presets['harmonic'])
 
     temps = np.linspace(1., 373, 128)
     known_cp = np.array([known_harm.get_Cp('kcal/mol/K', T=t) for t in temps])
     approx_cp = np.array([approx_harm.get_Cp('kcal/mol/K', T=t) for t in temps])
+    known_h = np.array([known_harm.get_H('kcal/mol', T=t) for t in temps])
+    approx_h = np.array([approx_harm.get_H('kcal/mol', T=t) for t in temps])
 
     # Assemble into a result object
     return HessianQuality(
@@ -72,5 +79,7 @@ def compare_hessians(atoms: ase.Atoms, known_hessian: np.ndarray, approx_hessian
         vib_mae=freq_mae,
         cp=approx_cp.tolist(),
         cp_error=(known_cp - approx_cp).tolist(),
+        h=approx_h,
+        h_error=(known_h - approx_h).tolist(),
         temps=temps.tolist()
     )
