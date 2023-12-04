@@ -17,7 +17,7 @@ done
 # Test with the vibrational modes
 notebook=3_displace-along-vibrational-modes.ipynb
 for step_size in 0.001 0.002; do
-    for n in 8 16 32; do
+    for n in 16 32 64; do
         papermill -p starting_geometry $xyz -p perturbs_per_evaluation $n -p step_size $step_size $notebook last.ipynb
     done
 done
