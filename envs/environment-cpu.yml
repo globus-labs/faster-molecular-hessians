@@ -4,7 +4,6 @@ name: jitterbug
 channels:
   - defaults
   - conda-forge
-  - pytorch
   - conda-forge/label/libint_dev
 dependencies:
   - python==3.9.*
@@ -26,10 +25,10 @@ dependencies:
   - geometric
 
   # Use Conda PyTorch to avoid OpenMP disagreement with other libraries
-  - pytorch==2.0.*
-  - cpuonly
+  - pytorch==2.0.*=*cpu*
 
   - pip
   - pip:
     - git+https://gitlab.com/ase/ase.git  # Needed for MOPAC
+    - gpytorch==1.11.*
     - -e ..[test]

@@ -26,6 +26,7 @@ def get_model_inputs(atoms: Atoms, reference: Atoms) -> np.ndarray:
     # Compute the displacements and the products of displacement
     disp_matrix = (atoms.positions - reference.positions).flatten()
     disp_prod_matrix = disp_matrix[:, None] * disp_matrix[None, :]
+
     # Multiply the off-axis terms by two, as they appear twice in the energy model
     n_terms = len(atoms) * 3
     off_diag = np.triu_indices(n_terms, k=1)

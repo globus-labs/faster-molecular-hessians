@@ -26,6 +26,7 @@ dependencies = [
     "colmena==0.5.*",
     "parsl>=2023.04",
     "ase>3.22",
+    "pmutt>=1.4.9",
     "tqdm"
 ]
 
@@ -37,6 +38,7 @@ repository = "https://github.com/globus-labs/faster-molecular-hessians"
 
 [project.optional-dependencies]
 test = [
+    'nbstripout',  # Used as a pre-commit hook
     'flake8',
     'pytest',
     'pytest-forked',

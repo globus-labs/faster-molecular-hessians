@@ -21,7 +21,15 @@ jobs:
       uses: conda-incubator/setup-miniconda@v2
       with:
         environment-file: envs/environment-cpu.yml
-        mamba-version: "*"
+        activate-environment: test
+        auto-activate-base: true
+        auto-update-conda: false
+        remove-profiles: true
+        architecture: x64
+        clean-patched-environment-file: true
+        run-post: true
+        use-mamba: true
+        miniforge-version: latest
     - name: Install test dependencies
       run: |
         pip install -e .[test]
