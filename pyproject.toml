@@ -7,7 +7,7 @@ authors = [
 ]
 description = 'Faster Hessians through machine learning'
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 license = { file = "LICENSE" }
 keywords = ["HPC", "AI", "Workflows", "Quantum Chemistry", "Chemical Engineering"]
 classifiers = [
@@ -25,7 +25,7 @@ classifiers = [
 dependencies = [
     "colmena==0.5.*",
     "parsl>=2023.04",
-    "ase==3.22.*",
+    "ase>3.22",
     "tqdm"
 ]
 

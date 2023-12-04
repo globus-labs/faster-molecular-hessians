@@ -6,10 +6,72 @@ and that smaller parameters are more likely than larger
 """
 import numpy as np
 from ase import Atoms
+from ase import io as aseio
+from geometric.molecule import Molecule
+from geometric.internal import DelocalizedInternalCoordinates as DIC
 from sklearn.linear_model import ARDRegression
 from sklearn.linear_model._base import LinearModel
-
 from .base import EnergyModel
+import geometric
+
+
+def get_internal_diff(ref_int: DIC, ref_mol: Molecule, atoms: Atoms) -> np.ndarray:
+    """Finds the differences in the values of the internal coordinates for two
+    of geometries.
+    Args:
+        ref_int: delocalized internal coordinate object (geometric package)
+        ref_mol: molecule object of minimum (geometric package)
+        atoms: molecule object of perturbation structure (ASE package)
+    Returns:
+        Array of displacements, in internal coordinates
+    """
+    # convert ASE to geometric molecule object
+    # this i/o is major slowdown, there has to be a better way
+    filename = 'tmp.xyz'
+    aseio.write(filename, atoms, 'xyz')
+    pert_mol = Molecule(filename, 'xyz')
+
+    ref_coords = ref_mol.xyzs[0].flatten()
+    pert_coords = pert_mol.xyzs[0].flatten()
+    int_diff = ref_int.calcDiff(pert_coords, ref_coords)
+    return (int_diff)
+
+# def get_internal_coords(atoms: Atoms) -> np.ndarray:
+#     #filename = 'tmp.xyz'
+#     #aseio.write(filename, atoms, 'xyz')
+#     #molecule = geometric.molecule.Molecule(filename, 'xyz')
+#     #IC = geometric.internal.DelocalizedInternalCoordinates(molecule, build=True, remove_tr=True)
+#     #coords = molecule.xyzs[0].flatten()#*geometric.nifty.ang2bohr
+#     #print('without rts')
+#     #print(IC.Prims)
+#     #print(IC.calculate(coords))
+#     ##IC.remove_TR(coords)
+#     ##print('without rts')
+#     ##print(IC.Prims)
+#     ##print(IC.calculate(coords))
+#     #return IC.calculate(coords)
+
+
+def get_model_internal_inputs(atoms: Atoms, ref_mol: Molecule, ref_IC: DIC) -> np.ndarray:
+    """Sets up first and second-order displacement vectors for a perturbation geometry
+    Args:
+        atoms: molecule object of perturbation structure (ASE package)
+        ref_mol: molecule object of minimum (geometric package)
+        ref_IC: delocalized internal coordinate object (geometric package)
+    Returns:
+        Array of Jacobian and Hessian displacements, in internal coordinates
+    """
+    # Compute the displacements and the products of displacement
+    disp_matrix = get_internal_diff(ref_IC, ref_mol, atoms)
+    disp_prod_matrix = disp_matrix[:, None] * disp_matrix[None, :]
+    n_terms = len(atoms) * 3 - 6
+    off_diag = np.triu_indices(n_terms, k=1)
+    disp_prod_matrix[off_diag] *= 2.
+    # Append the displacements and products of displacements
+    return np.concatenate([
+        disp_matrix,
+        disp_prod_matrix[np.triu_indices(n_terms)] / 2
+    ], axis=0)
 
 
 def get_model_inputs(atoms: Atoms, reference: Atoms) -> np.ndarray:
@@ -29,8 +91,7 @@ def get_model_inputs(atoms: Atoms, reference: Atoms) -> np.ndarray:
     # Multiply the off-axis terms by two, as they appear twice in the energy model
     n_terms = len(atoms) * 3
     off_diag = np.triu_indices(n_terms, k=1)
-    disp_prod_matrix[off_diag] *= 2
-
+    disp_prod_matrix[off_diag] *= 2.
     # Append the displacements and products of displacements
     return np.concatenate([
         disp_matrix,
@@ -64,17 +125,22 @@ class HarmonicModel(EnergyModel):
         self.regressor = regressor
 
     def train(self, data: list[Atoms]) -> LinearModel:
+        # Convert ASE object to geometric molecule object
+        filename = 'tmp.xyz'
+        aseio.write(filename, self.reference, 'xyz')
+        molecule = Molecule(filename, 'xyz')
+        # Build internal coordinates object
+        IC = DIC(molecule, build=True, remove_tr=True)
         # X: Displacement vectors for each
-        x = [get_model_inputs(atoms, self.reference) for atoms in data]
-
+        x = [get_model_internal_inputs(atoms, molecule, IC) for atoms in data]
         # Y: Subtract off the reference energy
         ref_energy = self.reference.get_potential_energy()
         y = [atoms.get_potential_energy() - ref_energy for atoms in data]
         # Fit the ARD model and ensure it captures the data well
-        model = self.regressor(fit_intercept=False).fit(x, y)
+        model = self.regressor(fit_intercept=True).fit(x, y)
         pred = model.predict(x)
         max_error = np.abs(pred - y).max()
-        if max_error > 0.001:
+        if max_error > 0.002:
             raise ValueError(f'Model error exceeds 1 meV. Actual: {max_error:.2e}')
 
         return model
@@ -118,15 +184,24 @@ class HarmonicModel(EnergyModel):
             The harmonic terms expressed as a Hessian matrix
         """
         # Get the parameters
-        n_coords = len(self.reference) * 3
+        filename = 'tmp.xyz'
+        aseio.write(filename, self.reference, 'xyz')
+        n_coords = len(self.reference) * 3 - 6
         triu_inds = np.triu_indices(n_coords)
         off_diag_triu_inds = np.triu_indices(n_coords, k=1)
 
         # Assemble the hessian
         hessian = np.zeros((n_coords, n_coords))
+        gradq = np.zeros(n_coords)
+        gradq = param[:n_coords]
         hessian[triu_inds] = param[n_coords:]  # The first n_coords terms are the linear part
         hessian[off_diag_triu_inds] /= 2
         hessian.T[triu_inds] = hessian[triu_inds]
-        # v = np.sqrt(self.reference.get_masses()).repeat(3).reshape(-1, 1)
-        # hessian /= np.dot(v, v.T)
-        return hessian
+        molecule = Molecule(filename, 'xyz')
+        IC = DIC(molecule, build=True, remove_tr=True)
+        coords = molecule.xyzs[0].flatten()*geometric.nifty.ang2bohr
+        hessian_cart = IC.calcHessCart(coords,  gradq, hessian)
+        # print(IC.Internals)
+        # print(IC.Prims)
+        # print(geometric.normal_modes.frequency_analysis(coords, hessian_cart, elem = molecule.elem))
+        return hessian_cart

@@ -1,0 +1,14 @@
+Total number of IJK combinations =: 35
+Num. of IJK with (Gi,Gj,Gk)=(0,0,0) =: 35
+    thread 0: first_ijk=0,  last_ijk=2
+    thread 1: first_ijk=3,  last_ijk=5
+    thread 2: first_ijk=6,  last_ijk=8
+    thread 3: first_ijk=9,  last_ijk=11
+    thread 4: first_ijk=12,  last_ijk=14
+    thread 5: first_ijk=15,  last_ijk=17
+    thread 6: first_ijk=18,  last_ijk=20
+    thread 7: first_ijk=21,  last_ijk=23
+    thread 8: first_ijk=24,  last_ijk=26
+    thread 9: first_ijk=27,  last_ijk=29
+    thread 10: first_ijk=30,  last_ijk=32
+    thread 11: first_ijk=33,  last_ijk=34

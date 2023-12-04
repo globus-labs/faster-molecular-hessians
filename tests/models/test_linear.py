@@ -3,6 +3,7 @@ from ase.build import molecule
 from ase.vibrations import VibrationsData
 
 from jitterbug.model.linear import get_model_inputs, HarmonicModel
+from jitterbug.model.linear_internals import HarmonicModel as ICHarmonicModel
 
 
 def test_disp_matrix():
@@ -36,6 +37,32 @@ def test_linear_model(train_set):
     model = HarmonicModel(reference)
     hessian_model = model.train(train_set)
     assert hessian_model.coef_.shape == (54,)
+
+    # Get the mean hessian
+    hessian = model.mean_hessian(hessian_model)
+    assert hessian.shape == (9, 9)
+
+    # Sample the Hessians, at least make sure the results are near correct
+    hessians = model.sample_hessians(hessian_model, num_samples=32)
+    assert len(hessians) == 32
+    assert np.isclose(hessians[0], hessians[0].T).all()
+
+    # Create a vibration data object
+    vib_data = VibrationsData.from_2d(reference, hessians[0])
+    zpe = vib_data.get_zero_point_energy()
+    print(zpe)
+    assert np.isclose(zpe, 0.63, atol=0.3)  # Make sure it's _close_
+
+
+def test_linear_internal_model(train_set):
+    # The first atom in the set should have forces
+    reference = train_set[0]
+    assert reference.get_forces().max() < 0.01
+
+    # Fit the model
+    model = ICHarmonicModel(reference)
+    hessian_model = model.train(train_set)
+    assert hessian_model.coef_.shape == (9,)
 
     # Get the mean hessian
     hessian = model.mean_hessian(hessian_model)
