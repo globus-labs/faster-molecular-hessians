@@ -9,3 +9,5 @@ def test_make_calculator():
 
     with raises(ValueError):
         make_calculator('pm7', 'wrong')
+
+    assert make_calculator('xtb', None).name == 'xtb'
