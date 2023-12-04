@@ -22,6 +22,7 @@ dependencies:
 
   # Interatomic forcefields
   - dscribe==2.1.*
+  - geometric
 
   # Use Conda PyTorch to avoid OpenMP disagreement with other libraries
   - pytorch==2.0.*=*cpu*
