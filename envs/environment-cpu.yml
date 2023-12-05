@@ -19,6 +19,7 @@ dependencies:
   # Quantum chemistry
   - psi4==1.8.*  # Remove for MacOS systems
   - mopac
+  - xtb-python  # Remove for MacOS
 
   # Interatomic forcefields
   - dscribe==2.1.*

@@ -17,6 +17,7 @@ def make_calculator(method: str, basis: Optional[str], **kwargs) -> Calculator:
     on the method name using the following rules:
 
     1. Use MOPAC if the method is PM7.
+    2. Use xTB if the method is xTB.
     2. Use Psi4 otherwise
 
     Any keyword arguments are passed to the calculator
@@ -32,5 +33,8 @@ def make_calculator(method: str, basis: Optional[str], **kwargs) -> Calculator:
         if not (basis is None or basis == "None"):
             raise ValueError(f'Basis must be none for method: {method}')
         return MOPAC(method=method, command='mopac PREFIX.mop > /dev/null')
+    elif method == 'xtb':
+        from xtb.ase.calculator import XTB
+        return XTB()
     else:
         return Psi4(method=method, basis=basis, **kwargs)
