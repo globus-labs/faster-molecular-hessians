@@ -17,6 +17,7 @@ def make_calculator(method: str, basis: Optional[str], **kwargs) -> Calculator:
     on the method name using the following rules:
 
     1. Use MOPAC if the method is PM7.
+    2. Use xTB if the method is xTB.
     2. Use Psi4 otherwise
 
     Any keyword arguments are passed to the calculator
