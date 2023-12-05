@@ -1,5 +1,6 @@
 """Tools for assessing the quality of a Hessian compared to a true one"""
 from dataclasses import dataclass
+from typing import Optional
 
 import ase
 from ase import units
@@ -11,6 +12,10 @@ from pmutt.statmech import StatMech, presets
 @dataclass
 class HessianQuality:
     """Measurements of the quality of a Hessian"""
+
+    # Metadata
+    scale_factor: float
+    """Scaling factor used for frequencies"""
 
     # Thermodynamics
     zpe: float
@@ -37,13 +42,15 @@ class HessianQuality:
     """Mean absolute error for the vibrational modes"""
 
 
-def compare_hessians(atoms: ase.Atoms, known_hessian: np.ndarray, approx_hessian: np.ndarray) -> HessianQuality:
+def compare_hessians(atoms: ase.Atoms, known_hessian: np.ndarray, approx_hessian: np.ndarray, scale_factor: Optional[float] = 1.) -> HessianQuality:
     """Compare two different hessians for same atomic structure
 
     Args:
         atoms: Structure
         known_hessian: 2D form of the target Hessian
         approx_hessian: 2D form of an approximate Hessian
+        scale_factor: Factor by which to scale frequencies from approximate Hessian before comparison.
+            Set to ``None`` to use the median ratio between the approximate and known frequency from each mode.
     Returns:
         Collection of the performance metrics
     """
@@ -56,6 +63,12 @@ def compare_hessians(atoms: ase.Atoms, known_hessian: np.ndarray, approx_hessian
     known_freqs = known_vibs.get_frequencies()
     is_real = np.isreal(known_freqs)
     approx_freqs = approx_vibs.get_frequencies()
+
+    # Scale, if desired
+    if scale_factor is None:
+        scale_factor = np.median(np.divide(known_freqs, approx_freqs))
+    approx_freqs *= scale_factor
+
     freq_error = np.subtract(approx_freqs[is_real], known_freqs[is_real])
     freq_mae = np.abs(freq_error).mean()
 
@@ -63,6 +76,10 @@ def compare_hessians(atoms: ase.Atoms, known_hessian: np.ndarray, approx_hessian
     #  TODO (wardlt): Might actually want to compute the symmetry number
     known_harm = StatMech(vib_wavenumbers=np.real(known_freqs[is_real]), atoms=atoms, symmetrynumber=1, **presets['harmonic'])
     approx_harm = StatMech(vib_wavenumbers=np.real(approx_freqs[is_real]), atoms=atoms, symmetrynumber=1, **presets['harmonic'])
+
+    approx_zpe = approx_harm.vib_model.get_ZPE() * units.mol / units.kcal
+    known_zpe = known_harm.vib_model.get_ZPE() * units.mol / units.kcal
+    zpe_error = approx_zpe - known_zpe
 
     temps = np.linspace(1., 373, 128)
     known_cp = np.array([known_harm.get_Cp('kcal/mol/K', T=t) for t in temps])
@@ -72,8 +89,9 @@ def compare_hessians(atoms: ase.Atoms, known_hessian: np.ndarray, approx_hessian
 
     # Assemble into a result object
     return HessianQuality(
-        zpe=approx_vibs.get_zero_point_energy() * units.mol / units.kcal,
-        zpe_error=(approx_vibs.get_zero_point_energy() - known_vibs.get_zero_point_energy()) * units.mol / units.kcal,
+        scale_factor=scale_factor,
+        zpe=approx_zpe,
+        zpe_error=zpe_error,
         vib_freqs=np.real(approx_freqs[is_real]).tolist(),
         vib_errors=np.abs(freq_error),
         vib_mae=freq_mae,
