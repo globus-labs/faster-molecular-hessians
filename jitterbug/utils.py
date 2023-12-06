@@ -30,7 +30,7 @@ def make_calculator(method: str, basis: Optional[str], **kwargs) -> Calculator:
     """
 
     if method in mopac_methods:
-        if not (basis is None or basis == "None"):
+        if not (basis is None or basis.lower() == "none"):
             raise ValueError(f'Basis must be none for method: {method}')
         return MOPAC(method=method, command='mopac PREFIX.mop > /dev/null')
     elif method == 'xtb':

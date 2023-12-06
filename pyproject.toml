@@ -45,3 +45,6 @@ test = [
     'pytest-timeout',
     'pytest-cov',
 ]
+
+[project.scripts]
+jitterbug = "jitterbug.cli:main"
