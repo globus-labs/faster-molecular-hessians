@@ -1,0 +1,153 @@
+"""Run an exact Hessian computation"""
+from csv import reader, writer
+from pathlib import Path
+from typing import Optional
+
+import ase
+import numpy as np
+from colmena.models import Result
+from colmena.queue import ColmenaQueues
+from colmena.thinker import BaseThinker, ResourceCounter, agent, result_processor
+
+
+class ExactHessianThinker(BaseThinker):
+    """Schedule the calculation of a complete set of numerical derivatives"""
+
+    def __init__(self, queues: ColmenaQueues, num_workers: int, atoms: ase.Atoms, run_dir: Path, step_size: float = 0.005):
+        super().__init__(queues, ResourceCounter(num_workers))
+        self.atoms = atoms
+
+        # Initialize storage for the energies
+        self.result_file = run_dir / 'simulation-results.json'
+        self.step_size = step_size
+        self.unperturbed_energy: Optional[float] = None
+        self.single_perturb = np.zeros((len(atoms), 3, 2)) * np.nan  # Perturbation of a single direction. [atom_id, axis (xyz), dir_id (0 back, 1 forward)]
+        self.double_perturb = np.zeros((len(atoms), 3, 2, len(atoms), 3, 2)) * np.nan
+        # Perturbation of two directions [atom1_id, axis1, dir1_id, atom2_id, axis2 dir2_id]
+
+        # Load what has been run already
+        self.run_dir = run_dir
+        self.run_dir.mkdir(exist_ok=True)
+        self.energy_path = self.run_dir / 'unperturbed.energy'
+        self.single_path = self.run_dir / 'single_energies.csv'
+        self.double_path = self.run_dir / 'double_energies.csv'
+
+        if self.energy_path.exists():
+            self.unperturbed_energy = float(self.energy_path.read_text())
+
+        if self.single_path.exists():
+            with self.single_path.open() as fp:
+                count = 0
+                for row in reader(fp):
+                    index = tuple(map(int, row[:-1]))
+                    count += 1
+                    self.single_perturb[index] = row[-1]
+            self.logger.info(f'Read {count} single perturbations out of {self.single_perturb.size}')
+
+        if self.double_path.exists():
+            with self.double_path.open() as fp:
+                count = 0
+                for row in reader(fp):
+                    index = tuple(map(int, row[:-1]))
+                    count += 1
+                    self.double_perturb[index] = row[-1]
+            self.logger.info(f'Read {count} double perturbations out of {self.double_perturb.size}')
+
+    @agent()
+    def submit_tasks(self):
+        """Submit all required tasks then start the shutdown process by exiting"""
+
+        # Start with the unperturbed energy
+        if self.unperturbed_energy is None:
+            self.queues.send_inputs(
+                self.atoms,
+                method='get_energy',
+                task_info={'type': 'unperturbed'}
+            )
+
+        # Submit the single perturbations
+        with np.nditer(self.single_perturb, flags=['multi_index']) as it:
+            count = 0
+            for x in it:
+                # Skip if done
+                if np.isfinite(x):
+                    continue
+
+                # Submit if not done
+                self.rec.acquire(None, 1)
+                count += 1
+                atom_id, axis_id, dir_id = it.multi_index
+
+                new_atoms = self.atoms.copy()
+                new_atoms.positions[atom_id, axis_id] += self.step_size - 2 * self.step_size * dir_id
+                self.queues.send_inputs(
+                    new_atoms,
+                    method='get_energy',
+                    task_info={'type': 'single', 'coord': it.multi_index}
+                )
+        self.logger.info(f'Finished submitting {count} single perturbations')
+
+        # Submit the double perturbations
+        with np.nditer(self.double_perturb, flags=['multi_index']) as it:
+            count = 0
+            for x in it:
+                # Skip if done
+                if np.isfinite(x):
+                    continue
+
+                # Skip if perturbing the same direction twice
+                if it.multi_index[:2] == it.multi_index[3:5]:
+                    continue
+
+                # Submit if not done
+                self.rec.acquire(None, 1)
+                count += 1
+
+                # Perturb two axes
+                new_atoms = self.atoms.copy()
+                for atom_id, axis_id, dir_id in [it.multi_index[:3], it.multi_index[3:]]:
+                    new_atoms.positions[atom_id, axis_id] += self.step_size - 2 * self.step_size * dir_id
+
+                new_atoms.positions[atom_id, axis_id] += self.step_size - 2 * self.step_size * dir_id
+                self.queues.send_inputs(
+                    new_atoms,
+                    method='get_energy',
+                    task_info={'type': 'double', 'coord': it.multi_index}
+                )
+        self.logger.info(f'Finished submitting {count} double perturbations')
+
+    @result_processor
+    def store_energy(self, result: Result):
+        """Store the energy in the appropriate files"""
+        self.rec.release()
+
+        # Store the result object to disk
+        with self.result_file.open('a') as fp:
+            print(result.json(exclude={'inputs'}), file=fp)
+
+        if not result.success:
+            self.logger.warning(f'Calculation failed due to {result.failure_info.exception}')
+            return
+
+        calc_type = result.task_info['type']
+        # Store unperturbed energy
+        if calc_type == 'unperturbed':
+            self.logger.info('Storing energy of unperturbed structure')
+            self.unperturbed_energy = result.value
+            self.energy_path.write_text(str(result.value))
+            return
+
+        # Store perturbed energy
+        coord = result.task_info['coord']
+        self.logger.info(f'Saving a {calc_type} perturbation: ({",".join(map(str, coord))})')
+        if calc_type == 'single':
+            energy_file = self.single_path
+            energies = self.single_perturb
+        else:
+            energy_file = self.double_path
+            energies = self.double_perturb
+
+        with energy_file.open('a') as fp:
+            csv_writer = writer(fp)
+            csv_writer.writerow(coord + [result.value])
+        energies[tuple(coord)] = result.value
