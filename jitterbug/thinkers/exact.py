@@ -108,7 +108,6 @@ class ExactHessianThinker(BaseThinker):
                 for atom_id, axis_id, dir_id in [it.multi_index[:3], it.multi_index[3:]]:
                     new_atoms.positions[atom_id, axis_id] += self.step_size - 2 * self.step_size * dir_id
 
-                new_atoms.positions[atom_id, axis_id] += self.step_size - 2 * self.step_size * dir_id
                 self.queues.send_inputs(
                     new_atoms,
                     method='get_energy',
@@ -151,3 +150,31 @@ class ExactHessianThinker(BaseThinker):
             csv_writer = writer(fp)
             csv_writer.writerow(coord + [result.value])
         energies[tuple(coord)] = result.value
+
+    def compute_hessian(self) -> np.ndarray:
+        """Compute the Hessian using finite diffences
+
+        Returns:
+            Hessian in the 2D form
+        Raises:
+            (ValueError) If there is missing data
+        """
+
+        # Check that all data are available
+        n_atoms = len(self.atoms)
+        if not np.isfinite(self.single_perturb).all():
+            raise ValueError(f'Missing {np.isnan(self.single_perturb).sum()} single perturbations')
+        expected_double = self.double_perturb.size - (4 * n_atoms ** 2)
+        if not np.isfinite(self.double_perturb).sum() == expected_double:
+            raise ValueError(f'Missing {expected_double - np.isfinite(self.double_perturb).sum()} double perturbations')
+
+        # Flatten the arrays
+        single_flat = np.reshape(self.single_perturb, (n_atoms * 3, 2))
+        double_flat = np.reshape(self.double_perturb, (n_atoms * 3, 2, n_atoms * 3, 2))
+
+        # Compute the finite differences
+        #  https://en.wikipedia.org/wiki/Finite_difference#Multivariate_finite_differences
+        diagonal = (single_flat.sum(axis=1) - self.unperturbed_energy * 2) / (self.step_size ** 2)
+        off_diagonal = (double_flat[:, 0, :, 0] + double_flat[:, 1, :, 1] - double_flat[:, 0, :, 1] - double_flat[:, 1, :, 0]) / (4 * self.step_size ** 2)
+        np.fill_diagonal(off_diagonal, 0)
+        return np.diag(diagonal) + off_diagonal
