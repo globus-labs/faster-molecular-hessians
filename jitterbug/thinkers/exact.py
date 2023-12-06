@@ -48,10 +48,13 @@ class ExactHessianThinker(BaseThinker):
             with self.double_path.open() as fp:
                 count = 0
                 for row in reader(fp):
-                    index = tuple(map(int, row[:-1]))
                     count += 1
-                    self.double_perturb[index] = row[-1]
-            self.logger.info(f'Read {count} double perturbations out of {self.double_perturb.size}')
+                    # Get the index and its symmetric counterpart
+                    index = tuple(map(int, row[:-1]))
+                    sym_index = list(index)
+                    sym_index[:3], sym_index[3:] = index[3:], index[:3]
+                    self.double_perturb[index] = self.double_perturb[tuple(sym_index)] = row[-1]
+            self.logger.info(f'Read {count} double perturbations')
 
     @agent()
     def submit_tasks(self):
@@ -95,8 +98,8 @@ class ExactHessianThinker(BaseThinker):
                 if np.isfinite(x):
                     continue
 
-                # Skip if perturbing the same direction twice
-                if it.multi_index[:2] == it.multi_index[3:5]:
+                # Skip if perturbing the same direction twice, or if from the lower triangle
+                if it.multi_index[:2] == it.multi_index[3:5] or it.multi_index[:3] < it.multi_index[3:]:
                     continue
 
                 # Submit if not done
@@ -149,10 +152,15 @@ class ExactHessianThinker(BaseThinker):
         with energy_file.open('a') as fp:
             csv_writer = writer(fp)
             csv_writer.writerow(coord + [result.value])
+
         energies[tuple(coord)] = result.value
+        if calc_type == 'double':
+            sym_coord = list(coord)
+            sym_coord[:3], sym_coord[3:] = coord[3:], coord[:3]
+            energies[tuple(sym_coord)] = result.value
 
     def compute_hessian(self) -> np.ndarray:
-        """Compute the Hessian using finite diffences
+        """Compute the Hessian using finite differences
 
         Returns:
             Hessian in the 2D form
