@@ -36,7 +36,7 @@ def task_server(queues):
     update_wrapper(energy_func, get_energy)
 
     # Make the task server
-    config = Config(executors=[HighThroughputExecutor(max_workers=1)])
+    config = Config(executors=[HighThroughputExecutor(max_workers=2)])
     server = ParslTaskServer([energy_func], queues, config)
 
     # Run and then kill when tests are complete
@@ -53,7 +53,7 @@ def test_exact(xyz_path, queues, tmpdir, ase_hessian):
     run_path = Path(tmpdir) / 'run'
     thinker = ExactHessianThinker(
         queues=queues,
-        num_workers=1,
+        num_workers=2,
         atoms=atoms,
         run_dir=run_path,
     )
