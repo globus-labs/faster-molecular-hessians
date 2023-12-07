@@ -32,8 +32,9 @@ def get_energy(atoms: ase.Atoms, method: str, basis: Optional[str], scratch_dir:
         calc = make_calculator(method, basis, directory=tmp.name, **kwargs)
         atoms.calc = calc
         atoms.get_potential_energy()
-        return write_to_string(atoms, 'json')
+        return write_to_string(atoms, 'extxyz')
     finally:
+        atoms.calc = None  # Ensure the calculator does not get passed back
         os.chdir(start_dir)
         tmp.cleanup()
 

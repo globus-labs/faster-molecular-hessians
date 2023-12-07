@@ -64,13 +64,14 @@ def main(args: Optional[list[str]] = None):
     if args.parsl_config is None:
         config = Config(run_dir=str(run_dir / 'parsl-logs'), executors=[HighThroughputExecutor(max_workers=1)])
         num_workers = 1
+        ase_options = {}
         logger.info('Running computations locally, one-at-a-time')
     else:
         config, num_workers, ase_options = load_configuration(args.parsl_config)
         logger.info(f'Running on {num_workers} workers as defined by {args.parsl_config}')
 
     # Make the function to compute energy
-    energy_fun = partial(get_energy, method=method, basis=basis)
+    energy_fun = partial(get_energy, method=method, basis=basis, **ase_options)
     update_wrapper(energy_fun, get_energy)
 
     # Create a thinker

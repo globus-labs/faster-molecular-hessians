@@ -64,6 +64,7 @@ class ExactHessianThinker(BaseThinker):
 
         # Start with the unperturbed energy
         if self.unperturbed_energy is None:
+            self.rec.acquire(None, 1)
             self.queues.send_inputs(
                 self.atoms,
                 method='get_energy',
@@ -79,7 +80,7 @@ class ExactHessianThinker(BaseThinker):
                     continue
 
                 # Submit if not done
-                self.rec.acquire(None, 1)
+                self.rec.acquire(None, 1)  # Wait until resources are free
                 count += 1
                 atom_id, axis_id, dir_id = it.multi_index
 
@@ -134,7 +135,7 @@ class ExactHessianThinker(BaseThinker):
             return
 
         calc_type = result.task_info['type']
-        atoms = read_from_string(result.value, 'json')
+        atoms = read_from_string(result.value, 'extxyz')
         energy = atoms.get_potential_energy()
 
         # Store unperturbed energy
