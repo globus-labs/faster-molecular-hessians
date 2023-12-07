@@ -11,4 +11,4 @@ def test_exact_solver(xyz_path):
             main([
                 str(xyz_path), '--exact', '--method', 'pm7', 'None'
             ])
-    assert (Path('run') / 'water' / 'pm7_none' / 'hessian.npy').exists()
+    assert (Path('run') / 'water' / 'pm7_none_exact' / 'hessian.npy').exists()

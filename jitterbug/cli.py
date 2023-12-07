@@ -36,7 +36,11 @@ def main(args: Optional[list[str]] = None):
 
     # Make the run directory
     method, basis = (x.lower() for x in args.method)
-    run_dir = Path('run') / xyz_name / f'{method}_{basis}'
+    if args.exact:
+        compute_name = 'exact'
+    else:
+        raise NotImplementedError()
+    run_dir = Path('run') / xyz_name / f'{method}_{basis}_{compute_name}'
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # Start logging
