@@ -12,7 +12,7 @@ from colmena.queue import PipeQueues
 from colmena.task_server import ParslTaskServer
 from parsl import Config, HighThroughputExecutor
 
-from jitterbug.parsl import get_energy
+from jitterbug.parsl import get_energy, load_configuration
 from jitterbug.thinkers.exact import ExactHessianThinker
 
 logger = logging.getLogger(__name__)
@@ -26,6 +26,7 @@ def main(args: Optional[list[str]] = None):
     parser.add_argument('--method', nargs=2, required=True,
                         help='Method to use to compute energies. Format: [method] [basis]. Example: B3LYP 6-31g*')
     parser.add_argument('--exact', help='Compute Hessian using numerical derivatives', action='store_true')
+    parser.add_argument('--parsl-config', help='Path to the Parsl configuration to use')
     args = parser.parse_args(args)
 
     # Load the structure
@@ -55,6 +56,15 @@ def main(args: Optional[list[str]] = None):
     (run_dir / xyz_path.name).write_text(xyz_path.read_text())
     logger.info(f'Started run for {xyz_name} at {method}/{basis}. Run directory: {run_dir.absolute()}')
 
+    # Load Parsl configuration
+    if args.parsl_config is None:
+        config = Config(run_dir=str(run_dir / 'parsl-logs'), executors=[HighThroughputExecutor(max_workers=1)])
+        num_workers = 1
+        logger.info('Running computations locally, one-at-a-time')
+    else:
+        config, num_workers, ase_options = load_configuration(args.parsl_config)
+        logger.info(f'Running on {num_workers} workers as defined by {args.parsl_config}')
+
     # Make the function to compute energy
     energy_fun = partial(get_energy, method=method, basis=basis)
     update_wrapper(energy_fun, get_energy)
@@ -66,14 +76,13 @@ def main(args: Optional[list[str]] = None):
             queues=queues,
             atoms=atoms,
             run_dir=run_dir,
-            num_workers=1,
+            num_workers=num_workers,
         )
         functions = []  # No other functions to run
     else:
         raise NotImplementedError()
 
     # Create the task server
-    config = Config(run_dir=str(run_dir / 'parsl-logs'), executors=[HighThroughputExecutor(max_workers=1)])
     task_server = ParslTaskServer([energy_fun] + functions, queues, config)
 
     # Run everything

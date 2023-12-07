@@ -4,6 +4,7 @@ from tempfile import TemporaryDirectory
 from typing import Optional
 from pathlib import Path
 
+from parsl import Config
 import ase
 
 from jitterbug.utils import make_calculator, write_to_string
@@ -35,3 +36,29 @@ def get_energy(atoms: ase.Atoms, method: str, basis: Optional[str], scratch_dir:
     finally:
         os.chdir(start_dir)
         tmp.cleanup()
+
+
+def load_configuration(path: os.PathLike, function_name: str = 'make_config') -> tuple[Config, int, dict]:
+    """Load a configuration from a file
+
+    Loads a function which produces a Parsl configuration object,
+     a number of workers to use for the computation,
+     and a dictionary of settings to pass to the ASE calculator.
+
+    Args:
+        path: Path to the configuration file
+        function_name: Which function from the configuration file to call.
+    Returns:
+        - Parsl configuration
+        - Worker count
+        - ASE option dictionary
+    """
+
+    spec_ns = {}
+    path = Path(path)
+    exec(path.read_text(), spec_ns)
+    if function_name not in spec_ns:
+        raise ValueError(f'Cannot find the function "{function_name}" in {path}')
+
+    # Execute it
+    return spec_ns[function_name]()
