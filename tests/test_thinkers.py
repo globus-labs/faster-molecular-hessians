@@ -7,7 +7,7 @@ from ase.vibrations import Vibrations
 from colmena.queue.python import PipeQueues
 from colmena.task_server.parsl import ParslTaskServer
 from parsl import Config, HighThroughputExecutor
-from pytest import fixture
+from pytest import fixture, mark
 
 from jitterbug.compare import compare_hessians
 from jitterbug.parsl import get_energy
@@ -46,6 +46,7 @@ def task_server(queues):
     server.join()
 
 
+@mark.timeout(60)
 def test_exact(xyz_path, queues, tmpdir, ase_hessian):
     # Make the thinker
     atoms = read(xyz_path)

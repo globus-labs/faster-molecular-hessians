@@ -1,8 +1,11 @@
 from ase.io import read
 
 from jitterbug.parsl import get_energy
+from jitterbug.utils import read_from_string
 
 
 def test_energy(xyz_path):
     atoms = read(xyz_path)
-    get_energy(atoms, 'pm7', None)
+    atoms_msg = get_energy(atoms, 'pm7', None)
+    new_atoms = read_from_string(atoms_msg, 'json')
+    assert 'energy' in new_atoms.calc.results

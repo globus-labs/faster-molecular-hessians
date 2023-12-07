@@ -1,10 +1,11 @@
 """Utility functions"""
 from typing import Optional
-
+from io import StringIO
 
 from ase.calculators.calculator import Calculator
 from ase.calculators.mopac import MOPAC
 from ase.calculators.psi4 import Psi4
+from ase import Atoms, io
 
 mopac_methods = ['pm7']
 """List of methods for which we will use MOPAC"""
@@ -38,3 +39,34 @@ def make_calculator(method: str, basis: Optional[str], **kwargs) -> Calculator:
         return XTB()
     else:
         return Psi4(method=method, basis=basis, **kwargs)
+
+
+# Taken from ExaMol
+def write_to_string(atoms: Atoms, fmt: str, **kwargs) -> str:
+    """Write an ASE atoms object to string
+
+    Args:
+        atoms: Structure to write
+        fmt: Target format
+        kwargs: Passed to the write function
+    Returns:
+        Structure written in target format
+    """
+
+    out = StringIO()
+    atoms.write(out, fmt, **kwargs)
+    return out.getvalue()
+
+
+def read_from_string(atoms_msg: str, fmt: str) -> Atoms:
+    """Read an ASE atoms object from a string
+
+    Args:
+        atoms_msg: String format of the object to read
+        fmt: Format (cannot be autodetected)
+    Returns:
+        Parsed atoms object
+    """
+
+    out = StringIO(str(atoms_msg))  # str() ensures that Proxies are resolved
+    return io.read(out, format=fmt)

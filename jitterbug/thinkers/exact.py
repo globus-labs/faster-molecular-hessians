@@ -9,6 +9,8 @@ from colmena.models import Result
 from colmena.queue import ColmenaQueues
 from colmena.thinker import BaseThinker, ResourceCounter, agent, result_processor
 
+from jitterbug.utils import read_from_string
+
 
 class ExactHessianThinker(BaseThinker):
     """Schedule the calculation of a complete set of numerical derivatives"""
@@ -132,11 +134,14 @@ class ExactHessianThinker(BaseThinker):
             return
 
         calc_type = result.task_info['type']
+        atoms = read_from_string(result.value, 'json')
+        energy = atoms.get_potential_energy()
+
         # Store unperturbed energy
         if calc_type == 'unperturbed':
             self.logger.info('Storing energy of unperturbed structure')
-            self.unperturbed_energy = result.value
-            self.energy_path.write_text(str(result.value))
+            self.unperturbed_energy = energy
+            self.energy_path.write_text(str(energy))
             return
 
         # Store perturbed energy
@@ -151,13 +156,13 @@ class ExactHessianThinker(BaseThinker):
 
         with energy_file.open('a') as fp:
             csv_writer = writer(fp)
-            csv_writer.writerow(coord + [result.value])
+            csv_writer.writerow(coord + [energy])
 
-        energies[tuple(coord)] = result.value
+        energies[tuple(coord)] = energy
         if calc_type == 'double':
             sym_coord = list(coord)
             sym_coord[:3], sym_coord[3:] = coord[3:], coord[:3]
-            energies[tuple(sym_coord)] = result.value
+            energies[tuple(sym_coord)] = energy
 
     def compute_hessian(self) -> np.ndarray:
         """Compute the Hessian using finite differences
