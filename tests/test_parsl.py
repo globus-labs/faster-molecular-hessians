@@ -12,7 +12,7 @@ def test_energy(xyz_path):
 
     atoms = read(xyz_path)
     atoms_msg = get_energy(atoms, 'pm7', None)
-    new_atoms = read_from_string(atoms_msg, 'json')
+    new_atoms = read_from_string(atoms_msg, 'extxyz')
     assert 'energy' in new_atoms.calc.results
 
     assert not mopac_out.exists()

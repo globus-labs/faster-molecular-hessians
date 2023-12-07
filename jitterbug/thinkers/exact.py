@@ -134,7 +134,7 @@ class ExactHessianThinker(BaseThinker):
             return
 
         calc_type = result.task_info['type']
-        atoms = read_from_string(result.value, 'json')
+        atoms = read_from_string(result.value, 'extxyz')
         energy = atoms.get_potential_energy()
 
         # Store unperturbed energy
