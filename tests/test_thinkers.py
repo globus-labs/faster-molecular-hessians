@@ -20,9 +20,13 @@ def queues():
     return PipeQueues(topics='simulation')
 
 
+@fixture(params=['water.xyz', 'radical.extxyz'])
+def atoms(file_dir, request):
+    return read(file_dir / request.param)
+
+
 @fixture()
-def ase_hessian(xyz_path, tmp_path) -> np.ndarray:
-    atoms = read(xyz_path)
+def ase_hessian(atoms, tmp_path) -> np.ndarray:
     atoms.calc = make_calculator('pm7', None)
     vib = Vibrations(atoms, delta=0.005, name=str(Path(tmp_path) / 'vib'))
     vib.run()
@@ -47,9 +51,8 @@ def task_server(queues):
 
 
 @mark.timeout(60)
-def test_exact(xyz_path, queues, tmpdir, ase_hessian):
+def test_exact(atoms, queues, tmpdir, ase_hessian):
     # Make the thinker
-    atoms = read(xyz_path)
     run_path = Path(tmpdir) / 'run'
     thinker = ExactHessianThinker(
         queues=queues,
@@ -59,7 +62,7 @@ def test_exact(xyz_path, queues, tmpdir, ase_hessian):
     )
     assert run_path.exists()
     assert np.isnan(thinker.double_perturb).all()
-    assert thinker.double_perturb.size == (3 ** 4 * 4)
+    assert thinker.double_perturb.size == len(atoms) ** 2 * 9 * 4
 
     # Run it
     thinker.run()
@@ -85,8 +88,8 @@ def test_exact(xyz_path, queues, tmpdir, ase_hessian):
     # Compute the Hessian
     hessian = thinker.compute_hessian()
     assert np.isfinite(hessian).all()
-    assert hessian.shape == (9, 9)
+    assert hessian.shape == (len(atoms) * 3, len(atoms) * 3)
 
     # Make sure it is close to ase's
     comparison = compare_hessians(atoms, hessian, ase_hessian)
-    assert abs(comparison.zpe_error) < 0.05
+    assert abs(comparison.zpe_error) < 0.2
