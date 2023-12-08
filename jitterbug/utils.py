@@ -11,7 +11,7 @@ mopac_methods = ['pm7']
 """List of methods for which we will use MOPAC"""
 
 
-def make_calculator(method: str, basis: Optional[str], multiplicity: int = 0, **kwargs) -> Calculator:
+def make_calculator(method: str, basis: Optional[str], multiplicity: int = 1, **kwargs) -> Calculator:
     """Make an ASE calculator that implements a desired method.
 
     This function will select the appropriate quantum chemistry code depending
@@ -26,6 +26,7 @@ def make_calculator(method: str, basis: Optional[str], multiplicity: int = 0, **
     Args:
         method: Name of the quantum chemistry method
         basis: Basis set name, if appropriate
+        multiplicity: Default multiplicity for the computation
     Returns:
         Calculator defined according to the user's settings
     """

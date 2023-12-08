@@ -75,7 +75,7 @@ def main(args: Optional[list[str]] = None):
 
     # Add multiplicity to the options
     if atoms.get_initial_magnetic_moments().sum() > 0:
-        mult = atoms.get_initial_magnetic_moments().sum() + 1
+        mult = int(atoms.get_initial_magnetic_moments().sum()) + 1
         ase_options['multiplicity'] = int(mult)
         logger.info(f'Running with a multiplicity of {mult}')
 
