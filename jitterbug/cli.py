@@ -14,6 +14,7 @@ from parsl import Config, HighThroughputExecutor
 
 from jitterbug.parsl import get_energy, load_configuration
 from jitterbug.thinkers.exact import ExactHessianThinker
+from jitterbug.utils import make_calculator
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,9 @@ def main(args: Optional[list[str]] = None):
     """Run Jitterbug"""
 
     parser = ArgumentParser()
-    parser.add_argument('xyz', help='Path to the XYZ file')
+    parser.add_argument('xyz',
+                        help='Path to the XYZ file. Use extended XYZ format '
+                             'to store information about charged or radical molecules')
     parser.add_argument('--method', nargs=2, required=True,
                         help='Method to use to compute energies. Format: [method] [basis]. Example: B3LYP 6-31g*')
     parser.add_argument('--exact', help='Compute Hessian using numerical derivatives', action='store_true')
@@ -31,7 +34,7 @@ def main(args: Optional[list[str]] = None):
 
     # Load the structure
     xyz_path = Path(args.xyz)
-    atoms = read(args.xyz)
+    atoms = read(args.xyz, format='extxyz')
     xyz_name = xyz_path.with_suffix('').name
 
     # Make the run directory
@@ -69,6 +72,19 @@ def main(args: Optional[list[str]] = None):
     else:
         config, num_workers, ase_options = load_configuration(args.parsl_config)
         logger.info(f'Running on {num_workers} workers as defined by {args.parsl_config}')
+
+    # Add multiplicity to the options
+    if atoms.get_initial_magnetic_moments().sum() > 0:
+        mult = atoms.get_initial_magnetic_moments().sum() + 1
+        ase_options['multiplicity'] = int(mult)
+        logger.info(f'Running with a multiplicity of {mult}')
+
+        # Test making the calculator
+        calc = make_calculator(method, basis, **ase_options)
+        if calc.name == 'psi4':
+            atoms.set_initial_magnetic_moments([0] * len(atoms))
+            ase_options['charge'] = int(atoms.get_initial_charges().sum())
+            logger.info('Using Psi4: Removed charge and magmom information from atoms object.')
 
     # Make the function to compute energy
     energy_fun = partial(get_energy, method=method, basis=basis, **ase_options)

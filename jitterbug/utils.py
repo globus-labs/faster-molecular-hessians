@@ -11,7 +11,7 @@ mopac_methods = ['pm7']
 """List of methods for which we will use MOPAC"""
 
 
-def make_calculator(method: str, basis: Optional[str], **kwargs) -> Calculator:
+def make_calculator(method: str, basis: Optional[str], multiplicity: int = 0, **kwargs) -> Calculator:
     """Make an ASE calculator that implements a desired method.
 
     This function will select the appropriate quantum chemistry code depending
@@ -38,7 +38,10 @@ def make_calculator(method: str, basis: Optional[str], **kwargs) -> Calculator:
         from xtb.ase.calculator import XTB
         return XTB()
     else:
-        return Psi4(method=method, basis=basis, **kwargs)
+        return Psi4(method=method, basis=basis,
+                    multiplicity=multiplicity,
+                    reference='rhf' if multiplicity == 1 else 'uhf',
+                    **kwargs)
 
 
 # Taken from ExaMol
