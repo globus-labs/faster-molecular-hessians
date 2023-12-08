@@ -178,7 +178,7 @@ class ExactHessianThinker(BaseThinker):
         n_atoms = len(self.atoms)
         if not np.isfinite(self.single_perturb).all():
             raise ValueError(f'Missing {np.isnan(self.single_perturb).sum()} single perturbations')
-        expected_double = self.double_perturb.size - (4 * n_atoms ** 2)
+        expected_double = (n_atoms * 3) * (n_atoms * 3 - 1) * 4
         if not np.isfinite(self.double_perturb).sum() == expected_double:
             raise ValueError(f'Missing {expected_double - np.isfinite(self.double_perturb).sum()} double perturbations')
 
