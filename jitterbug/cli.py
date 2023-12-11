@@ -15,8 +15,11 @@ from parsl import Config, HighThroughputExecutor
 from jitterbug.parsl import get_energy, load_configuration
 from jitterbug.thinkers.exact import ExactHessianThinker
 from jitterbug.utils import make_calculator
+from jitterbug.sampler import methods
 
 logger = logging.getLogger(__name__)
+
+approx_methods = list(methods.keys())
 
 
 def main(args: Optional[list[str]] = None):
@@ -28,7 +31,14 @@ def main(args: Optional[list[str]] = None):
                              'to store information about charged or radical molecules')
     parser.add_argument('--method', nargs=2, required=True,
                         help='Method to use to compute energies. Format: [method] [basis]. Example: B3LYP 6-31g*')
-    parser.add_argument('--exact', help='Compute Hessian using numerical derivatives', action='store_true')
+    parser.add_argument('--approach', default='exact',
+                        choices=['exact', 'static'],
+                        help='Method used to compute the Hessian. Either "exact", or'
+                             '"static" for a approximate method using a fixed set of structures.')
+    parser.add_argument('--amount-to-run', default=0.1, type=float,
+                        help='Amount of structures to run for approximate Hessian. '
+                             'Either number (if >1) or fraction of number required to compute exact Hessian,'
+                             '`6N + 2 * (3N) * (3N - 1) + 1`.')
     parser.add_argument('--parsl-config', help='Path to the Parsl configuration to use')
     args = parser.parse_args(args)
 
@@ -39,10 +49,7 @@ def main(args: Optional[list[str]] = None):
 
     # Make the run directory
     method, basis = (x.lower() for x in args.method)
-    if args.exact:
-        compute_name = 'exact'
-    else:
-        raise NotImplementedError()
+    compute_name = args.approach
     run_dir = Path('run') / xyz_name / f'{method}_{basis}_{compute_name}'
     run_dir.mkdir(parents=True, exist_ok=True)
 

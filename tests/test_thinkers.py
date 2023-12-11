@@ -6,12 +6,20 @@ from ase.io import read
 from ase.vibrations import Vibrations
 from colmena.queue.python import PipeQueues
 from colmena.task_server.parsl import ParslTaskServer
+from dscribe.descriptors import MBTR
 from parsl import Config, HighThroughputExecutor
 from pytest import fixture, mark
+from sklearn.kernel_ridge import KernelRidge
+from sklearn.model_selection import GridSearchCV
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 from jitterbug.compare import compare_hessians
+from jitterbug.model.dscribe.globald import DScribeGlobalEnergyModel
 from jitterbug.parsl import get_energy
+from jitterbug.sampler import UniformSampler
 from jitterbug.thinkers.exact import ExactHessianThinker
+from jitterbug.thinkers.static import ApproximateHessianThinker
 from jitterbug.utils import make_calculator
 
 
@@ -31,6 +39,30 @@ def ase_hessian(atoms, tmp_path) -> np.ndarray:
     vib = Vibrations(atoms, delta=0.005, name=str(Path(tmp_path) / 'vib'))
     vib.run()
     return vib.get_vibrations().get_hessian_2d()
+
+
+@fixture()
+def mbtr(atoms):
+    n_points = 32
+    r_cutoff = 6.
+    desc = MBTR(
+        species=["H", "C", "N", "O"],
+        geometry={"function": "angle"},
+        grid={"min": 0., "max": 180, "n": n_points, "sigma": 180. / n_points / 2.},
+        weighting={"function": "smooth_cutoff", "r_cut": r_cutoff, "threshold": 1e-3},
+        periodic=False,
+    )
+    model = Pipeline(
+        [('scale', StandardScaler()),
+         ('krr', GridSearchCV(KernelRidge(kernel='rbf', alpha=1e-10),
+                              {'gamma': np.logspace(-5, 5, 32)}))]
+    )
+    return DScribeGlobalEnergyModel(
+        reference=atoms,
+        model=model,
+        descriptors=desc,
+        num_calculators=2
+    )
 
 
 @fixture(autouse=True)
@@ -93,3 +125,47 @@ def test_exact(atoms, queues, tmpdir, ase_hessian):
     # Make sure it is close to ase's
     comparison = compare_hessians(atoms, hessian, ase_hessian)
     assert abs(comparison.zpe_error) < 0.2
+
+
+@mark.timeout(60)
+def test_approx(atoms, queues, tmpdir, ase_hessian, mbtr):
+    # Make the thinker
+    run_path = Path(tmpdir) / 'run'
+    thinker = ApproximateHessianThinker(
+        queues=queues,
+        num_workers=2,
+        atoms=atoms,
+        run_dir=run_path,
+        num_to_run=128,
+        model=mbtr,
+        sampler=UniformSampler()
+    )
+    assert run_path.exists()
+    assert thinker.completed == set()
+
+    # Run it
+    thinker.run()
+    assert len(thinker.completed) == 128
+
+    # Make sure it picks up from a previous run
+    thinker = ApproximateHessianThinker(
+        queues=queues,
+        num_workers=2,
+        atoms=atoms,
+        run_dir=run_path,
+        num_to_run=128,
+        model=mbtr,
+        sampler=UniformSampler()
+    )
+    assert len(thinker.completed) == 128
+
+    # Make sure it doesn't do any new calculations
+    start_size = (run_path / 'simulation-results.json').stat().st_size
+    thinker.run()
+    end_size = (run_path / 'simulation-results.json').stat().st_size
+    assert start_size == end_size
+
+    # Compute the Hessian
+    hessian = thinker.compute_hessian()
+    assert np.isfinite(hessian).all()
+    assert hessian.shape == (len(atoms) * 3, len(atoms) * 3)

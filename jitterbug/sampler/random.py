@@ -8,7 +8,7 @@ from jitterbug.sampler.base import StructureSampler
 
 
 @dataclass
-class RandomSampler(StructureSampler):
+class UniformSampler(StructureSampler):
     """Sample randomly-chosen directions
 
     Perturbs each atom in each direction a random amount between -:attr:`step_size` and :attr:`step_size`.
@@ -16,6 +16,10 @@ class RandomSampler(StructureSampler):
 
     step_size: float = 0.005
     """Amount to displace the atoms (units: Angstrom)"""
+
+    @property
+    def name(self) -> str:
+        return f'uniform_{self.step_size:.3e}'
 
     def produce_structures(self, atoms: ase.Atoms, count: int, seed: int = 1) -> list[ase.Atoms]:
         # Make the RNG

@@ -7,6 +7,11 @@ class StructureSampler:
     Options for the sampler should be defined in the initializer.
     """
 
+    @property
+    def name(self) -> str:
+        """Name for the sampling strategy"""
+        raise NotImplementedError()
+
     def produce_structures(self, atoms: ase.Atoms, count: int, seed: int = 1) -> list[ase.Atoms]:
         """Generate a set of training structure
 

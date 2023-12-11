@@ -2,8 +2,8 @@
 from typing import Type
 
 from .base import StructureSampler
-from .random import RandomSampler
+from .random import UniformSampler
 
 methods: dict[str, Type[StructureSampler]] = {
-    'simple': RandomSampler
+    'uniform': UniformSampler
 }
