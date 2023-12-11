@@ -38,7 +38,7 @@ class ApproximateHessianThinker(HessianThinker):
         # Generate the structures to be sampled
         self.to_sample = self.sampler.produce_structures(atoms, num_to_run)
         sampler_name = self.sampler.name
-        self.logger.info(f'Generated {self.to_sample} structures with strategy: {sampler_name}')
+        self.logger.info(f'Generated {len(self.to_sample)} structures with strategy: {sampler_name}')
 
         # Find how many we've done already
         self.db_path = self.run_dir / 'atoms.db'
