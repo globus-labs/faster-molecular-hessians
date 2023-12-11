@@ -12,10 +12,12 @@ from colmena.queue import PipeQueues
 from colmena.task_server import ParslTaskServer
 from parsl import Config, HighThroughputExecutor
 
+from jitterbug.model.dscribe import make_global_mbtr_model
 from jitterbug.parsl import get_energy, load_configuration
 from jitterbug.thinkers.exact import ExactHessianThinker
+from jitterbug.thinkers.static import ApproximateHessianThinker
 from jitterbug.utils import make_calculator
-from jitterbug.sampler import methods
+from jitterbug.sampler import methods, UniformSampler
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +51,7 @@ def main(args: Optional[list[str]] = None):
 
     # Make the run directory
     method, basis = (x.lower() for x in args.method)
-    compute_name = args.approach
-    run_dir = Path('run') / xyz_name / f'{method}_{basis}_{compute_name}'
+    run_dir = Path('run') / xyz_name / f'{method}_{basis}_{args.approach}'
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # Start logging
@@ -99,14 +100,31 @@ def main(args: Optional[list[str]] = None):
 
     # Create a thinker
     queues = PipeQueues(topics=['simulation'])
-    if args.exact:
+    functions = []  # Additional functions needed by thinker
+    if args.approach == 'exact':
         thinker = ExactHessianThinker(
             queues=queues,
             atoms=atoms,
             run_dir=run_dir,
             num_workers=num_workers,
         )
-        functions = []  # No other functions to run
+    elif args.approach == 'static':
+        # Determine the number to run
+        exact_needs = len(atoms) * 3 * 2 + (len(atoms) * 3) * (len(atoms) * 3 - 1) * 2 + 1
+        if args.amount_to_run < 1:
+            num_to_run = int(args.amount_to_run * exact_needs)
+        else:
+            num_to_run = int(args.amount_to_run)
+        logger.info(f'Running {num_to_run} energies out of {exact_needs} required for exact Hessian')
+        thinker = ApproximateHessianThinker(
+            queues=queues,
+            atoms=atoms,
+            run_dir=run_dir,
+            num_workers=num_workers,
+            num_to_run=num_to_run,
+            sampler=UniformSampler(),  # TODO (wardlt): Make this configurable
+            model=make_global_mbtr_model(atoms)  # TODO (wardlt): Make this configurable
+        )
     else:
         raise NotImplementedError()
 

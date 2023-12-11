@@ -6,16 +6,11 @@ from ase.io import read
 from ase.vibrations import Vibrations
 from colmena.queue.python import PipeQueues
 from colmena.task_server.parsl import ParslTaskServer
-from dscribe.descriptors import MBTR
 from parsl import Config, HighThroughputExecutor
 from pytest import fixture, mark
-from sklearn.kernel_ridge import KernelRidge
-from sklearn.model_selection import GridSearchCV
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 
 from jitterbug.compare import compare_hessians
-from jitterbug.model.dscribe.globald import DScribeGlobalEnergyModel
+from jitterbug.model.dscribe import make_global_mbtr_model
 from jitterbug.parsl import get_energy
 from jitterbug.sampler import UniformSampler
 from jitterbug.thinkers.exact import ExactHessianThinker
@@ -43,26 +38,7 @@ def ase_hessian(atoms, tmp_path) -> np.ndarray:
 
 @fixture()
 def mbtr(atoms):
-    n_points = 32
-    r_cutoff = 6.
-    desc = MBTR(
-        species=["H", "C", "N", "O"],
-        geometry={"function": "angle"},
-        grid={"min": 0., "max": 180, "n": n_points, "sigma": 180. / n_points / 2.},
-        weighting={"function": "smooth_cutoff", "r_cut": r_cutoff, "threshold": 1e-3},
-        periodic=False,
-    )
-    model = Pipeline(
-        [('scale', StandardScaler()),
-         ('krr', GridSearchCV(KernelRidge(kernel='rbf', alpha=1e-10),
-                              {'gamma': np.logspace(-5, 5, 32)}))]
-    )
-    return DScribeGlobalEnergyModel(
-        reference=atoms,
-        model=model,
-        descriptors=desc,
-        num_calculators=2
-    )
+    return make_global_mbtr_model(atoms)
 
 
 @fixture(autouse=True)
