@@ -7,20 +7,19 @@ import ase
 import numpy as np
 from colmena.models import Result
 from colmena.queue import ColmenaQueues
-from colmena.thinker import BaseThinker, ResourceCounter, agent, result_processor
+from colmena.thinker import ResourceCounter, agent, result_processor
 
+from jitterbug.thinkers.base import HessianThinker
 from jitterbug.utils import read_from_string
 
 
-class ExactHessianThinker(BaseThinker):
+class ExactHessianThinker(HessianThinker):
     """Schedule the calculation of a complete set of numerical derivatives"""
 
     def __init__(self, queues: ColmenaQueues, num_workers: int, atoms: ase.Atoms, run_dir: Path, step_size: float = 0.005):
-        super().__init__(queues, ResourceCounter(num_workers))
-        self.atoms = atoms
+        super().__init__(queues, ResourceCounter(num_workers), run_dir, atoms)
 
         # Initialize storage for the energies
-        self.result_file = run_dir / 'simulation-results.json'
         self.step_size = step_size
         self.unperturbed_energy: Optional[float] = None
         self.single_perturb = np.zeros((len(atoms), 3, 2)) * np.nan  # Perturbation of a single direction. [atom_id, axis (xyz), dir_id (0 back, 1 forward)]
@@ -31,8 +30,6 @@ class ExactHessianThinker(BaseThinker):
 
         # Load what has been run already
         self.total_complete = 0
-        self.run_dir = run_dir
-        self.run_dir.mkdir(exist_ok=True)
         self.energy_path = self.run_dir / 'unperturbed.energy'
         self.single_path = self.run_dir / 'single_energies.csv'
         self.double_path = self.run_dir / 'double_energies.csv'
