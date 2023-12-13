@@ -49,6 +49,15 @@ def test_linear_model(train_set, model_type, num_params):
     assert len(hessians) == 32
     assert np.isclose(hessians[0], hessians[0].T).all()
 
+    # Make sure the underlying distribution has the same mean
+    dist = model.get_hessian_distribution(hessian_model)
+    ind = np.triu_indices(9)
+    assert np.isclose(
+        np.mean(hessians, axis=0)[ind],
+        dist.mean,
+        atol=10  # Does not have to be close. Our sampling size is pretty small
+    ).all()
+
     # Only test accuracy with IC harmonic. Other one's trash
     if isinstance(model, ICHarmonicModel):
         vib_data = VibrationsData.from_2d(reference, hessians[0])

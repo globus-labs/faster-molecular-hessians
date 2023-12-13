@@ -5,6 +5,7 @@ from random import choices
 from pathlib import Path
 import os
 
+import ase
 import numpy as np
 from scipy import stats
 from ase import Atoms
@@ -14,6 +15,9 @@ from ase.calculators.calculator import Calculator
 
 class EnergyModel:
     """Base class for functions which predict energy given molecular structure"""
+
+    reference: ase.Atoms
+    """Structure for which we will be computing Hessians"""
 
     def train(self, data: list[Atoms]) -> object:
         """Produce an energy model given observations of energies
@@ -42,6 +46,31 @@ class EnergyModel:
             num_samples: Number of Hessians to sample
         Returns:
             A list of 2D hessians
+        """
+        n_params = len(self.reference) * 3
+        dist = self.get_hessian_distribution(model)
+        diag_ind = np.diag_indices(n_params)
+        triu_ind = np.triu_indices(n_params)
+        output = []
+        for sample in dist.rvs(size=num_samples):
+            # Fill in a 2D version
+            sample_hessian = np.zeros((n_params, n_params))
+            sample_hessian[triu_ind] = sample
+
+            # Make it symmetric
+            sample_hessian += sample_hessian.T
+            sample_hessian[diag_ind] /= 2
+
+            output.append(sample_hessian)
+        return output
+
+    def get_hessian_distribution(self, model: object) -> stats.multivariate_normal:
+        """Get a multi-variate normal distribution of the independent parameters for the hessian
+
+        Args:
+            model: Model trained by this class
+        Returns:
+            A MVN distribution for the upper triangle of the Hessian matrix (in row-major order)
         """
         raise NotImplementedError()
 
@@ -105,7 +134,7 @@ class ASEEnergyModel(EnergyModel):
         # Return the mean
         return np.mean(hessians, axis=0)
 
-    def sample_hessians(self, models: list[Calculator], num_samples: int) -> list[np.ndarray]:
+    def get_hessian_distribution(self, models: list[Calculator]) -> list[np.ndarray]:
         # Run all calculators
         hessians = [self.compute_hessian(self.reference, calc) for calc in models]
 
@@ -116,17 +145,4 @@ class ASEEnergyModel(EnergyModel):
         hessian_covar = np.cov(hessians_flat, rowvar=False)
 
         # Generate samples
-        hessian_mvn = stats.multivariate_normal(hessian_mean, hessian_covar, allow_singular=True)
-        diag_indices = np.diag_indices(hessians[0].shape[0])
-        output = []
-        for sample in hessian_mvn.rvs(size=num_samples):
-            # Fill in a 2D version
-            sample_hessian = np.zeros_like(hessians[0])
-            sample_hessian[triu_ind] = sample
-
-            # Make it symmetric
-            sample_hessian += sample_hessian.T
-            sample_hessian[diag_indices] /= 2
-
-            output.append(sample_hessian)
-        return output
+        return stats.multivariate_normal(hessian_mean, hessian_covar, allow_singular=True)
