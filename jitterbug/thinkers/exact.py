@@ -27,6 +27,7 @@ class ExactHessianThinker(BaseThinker):
         self.double_perturb = np.zeros((len(atoms), 3, 2, len(atoms), 3, 2)) * np.nan
         self.total_required = len(atoms) * 3 * 2 + (len(atoms) * 3) * (len(atoms) * 3 - 1) * 2 + 1
         # Perturbation of two directions [atom1_id, axis1, dir1_id, atom2_id, axis2 dir2_id]
+        self.logger.info(f'Preparing to run {self.total_required} energy computations')
 
         # Load what has been run already
         self.total_complete = 0
