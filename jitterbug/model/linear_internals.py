@@ -9,6 +9,7 @@ from ase import Atoms
 from ase import io as aseio
 from geometric.molecule import Molecule
 from geometric.internal import DelocalizedInternalCoordinates as DIC
+from scipy import stats
 from sklearn.linear_model import ARDRegression
 from sklearn.linear_model._base import LinearModel
 from .base import EnergyModel
@@ -174,6 +175,17 @@ class HarmonicModel(EnergyModel):
             hessian = self._params_to_hessian(param)
             output.append(hessian)
         return output
+
+    def get_hessian_distribution(self, model: LinearModel) -> stats.multivariate_normal:
+        # I'll go back and figure out the correct math for transforming the covariance matrix of the internal hessian
+        #  to that of the cartesian Hessian. We'll just refit
+        ind = np.triu_indices(len(self.reference) * 3)
+        samples = [x[ind] for x in self.sample_hessians(model, 128)]
+        return stats.multivariate_normal(
+            np.mean(samples, axis=0),
+            np.cov(samples, rowvar=False),
+            allow_singular=True
+        )
 
     def _params_to_hessian(self, param: np.ndarray) -> np.ndarray:
         """Convert the parameters for the linear model into a Hessian

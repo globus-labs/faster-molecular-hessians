@@ -6,6 +6,7 @@ and that smaller parameters are more likely than larger
 """
 import numpy as np
 from ase import Atoms
+from scipy.stats import multivariate_normal
 from sklearn.linear_model import ARDRegression
 from sklearn.linear_model._base import LinearModel
 
@@ -83,7 +84,7 @@ class HarmonicModel(EnergyModel):
     def mean_hessian(self, model: LinearModel) -> np.ndarray:
         return self._params_to_hessian(model.coef_)
 
-    def sample_hessians(self, model: LinearModel, num_samples: int) -> list[np.ndarray]:
+    def get_hessian_distribution(self, model: LinearModel) -> multivariate_normal:
         # Get the covariance matrix
         if not hasattr(model, 'sigma_'):  # pragma: no-coverage
             raise ValueError(f'Sampling only possible with Bayesian regressors. You trained a {type(model)}')
@@ -101,14 +102,8 @@ class HarmonicModel(EnergyModel):
             sigma = model.sigma_
 
         # Sample the model parameters
-        params = np.random.multivariate_normal(model.coef_, sigma, size=num_samples)
-
-        # Assemble them into Hessians
-        output = []
-        for param in params:
-            hessian = self._params_to_hessian(param)
-            output.append(hessian)
-        return output
+        n_coords = len(self.reference) * 3
+        return multivariate_normal(model.coef_[n_coords:], sigma[n_coords:, n_coords:], allow_singular=True)
 
     def _params_to_hessian(self, param: np.ndarray) -> np.ndarray:
         """Convert the parameters for the linear model into a Hessian
@@ -128,6 +123,4 @@ class HarmonicModel(EnergyModel):
         hessian[triu_inds] = param[n_coords:]  # The first n_coords terms are the linear part
         hessian[off_diag_triu_inds] /= 2
         hessian.T[triu_inds] = hessian[triu_inds]
-        # v = np.sqrt(self.reference.get_masses()).repeat(3).reshape(-1, 1)
-        # hessian /= np.dot(v, v.T)
         return hessian
