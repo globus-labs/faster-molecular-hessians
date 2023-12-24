@@ -4,6 +4,7 @@ from functools import partial, update_wrapper
 from pathlib import Path
 from typing import Optional
 import logging
+import json
 import sys
 
 import numpy as np
@@ -41,6 +42,9 @@ def main(args: Optional[list[str]] = None):
                         help='Amount of structures to run for approximate Hessian. '
                              'Either number (if >1) or fraction of number required to compute exact Hessian,'
                              '`6N + 2 * (3N) * (3N - 1) + 1`.')
+    parser.add_argument('--code', default=None, help='Name of code to use. Usually detected from method')
+    parser.add_argument('--exachem-template', default=None,
+                        help='Path to a template file for ExaChem')
     parser.add_argument('--parsl-config', help='Path to the Parsl configuration to use')
     args = parser.parse_args(args)
 
@@ -81,6 +85,12 @@ def main(args: Optional[list[str]] = None):
         config, num_workers, ase_options = load_configuration(args.parsl_config)
         logger.info(f'Running on {num_workers} workers as defined by {args.parsl_config}')
 
+    # Load the ExaChem template file, if needed
+    if args.exachem_template is not None:
+        with open(args.exachem_template) as fp:
+            ase_options['template'] = json.load(fp)
+        logger.info(f'Loaded exachem template from: {args.exachem_template}')
+
     # Add multiplicity to the options
     if atoms.get_initial_magnetic_moments().sum() > 0:
         mult = int(atoms.get_initial_magnetic_moments().sum()) + 1
@@ -88,14 +98,14 @@ def main(args: Optional[list[str]] = None):
         logger.info(f'Running with a multiplicity of {mult}')
 
         # Test making the calculator
-        calc = make_calculator(method, basis, **ase_options)
+        calc = make_calculator(method, basis, code=args.code, **ase_options)
         if calc.name == 'psi4':
             atoms.set_initial_magnetic_moments([0] * len(atoms))
             ase_options['charge'] = int(atoms.get_initial_charges().sum())
             logger.info('Using Psi4: Removed charge and magmom information from atoms object.')
 
     # Make the function to compute energy
-    energy_fun = partial(get_energy, method=method, basis=basis, **ase_options)
+    energy_fun = partial(get_energy, method=method, basis=basis, code=args.code, **ase_options)
     update_wrapper(energy_fun, get_energy)
 
     # Create a thinker

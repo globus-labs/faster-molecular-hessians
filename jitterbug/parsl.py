@@ -1,6 +1,7 @@
 """Wrappers for functions compatible with the Parsl workflow engine"""
 import os
-from tempfile import TemporaryDirectory
+import shutil
+from tempfile import mkdtemp
 from typing import Optional
 from pathlib import Path
 
@@ -10,7 +11,9 @@ import ase
 from jitterbug.utils import make_calculator, write_to_string
 
 
-def get_energy(atoms: ase.Atoms, method: str, basis: Optional[str], scratch_dir: Optional[str] = None, **kwargs) -> str:
+def get_energy(atoms: ase.Atoms, method: str, basis: Optional[str], scratch_dir: Optional[str] = None,
+               cleanup: bool = True,
+               **kwargs) -> str:
     """Compute the energy of an atomic structure
 
     Keyword arguments are passed to :meth:`make_calculator`.
@@ -20,23 +23,25 @@ def get_energy(atoms: ase.Atoms, method: str, basis: Optional[str], scratch_dir:
         method: Name of the method to use (e.g., B3LYP)
         basis: Basis set to use (e.g., cc-PVTZ)
         scratch_dir: Path to the scratch directory.
+        cleanup: Whether to delete temporary files when completed
     Returns:
         Atoms record serialized with the energy and any other data produced by the calculator
     """
 
     # Make a temporary directory
     start_dir = Path.cwd()
-    tmp = TemporaryDirectory(dir=scratch_dir, prefix='jitterbug_')
+    tmp = mkdtemp(dir=scratch_dir, prefix='jitterbug_')
     try:
-        os.chdir(tmp.name)
-        calc = make_calculator(method, basis, directory=tmp.name, **kwargs)
+        os.chdir(tmp)
+        calc = make_calculator(method, basis, directory=tmp, **kwargs)
         atoms.calc = calc
         atoms.get_potential_energy()
         return write_to_string(atoms, 'extxyz')
     finally:
         atoms.calc = None  # Ensure the calculator does not get passed back
         os.chdir(start_dir)
-        tmp.cleanup()
+        if cleanup:
+            shutil.rmtree(tmp)
 
 
 def load_configuration(path: os.PathLike, function_name: str = 'make_config') -> tuple[Config, int, dict]:
