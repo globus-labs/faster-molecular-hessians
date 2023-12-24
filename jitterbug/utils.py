@@ -56,6 +56,9 @@ def make_calculator(method: str, basis: Optional[str], multiplicity: int = 1,
                     multiplicity=multiplicity,
                     reference='rhf' if multiplicity == 1 else 'uhf',
                     **kwargs)
+    elif code == 'exachem':
+        from exachem.calc import ExaChem
+        return ExaChem(method=method, basisset=basis, **kwargs)
     else:
         raise ValueError(f'Code not supported: {code}')
 
