@@ -22,44 +22,61 @@ def descriptors(train_set, soap):
     return soap.create(train_set)
 
 
+@fixture
+def elements(train_set):
+    return train_set[0].get_atomic_numbers()
+
+
 @mark.parametrize('use_adr', [True, False])
-def test_make_model(use_adr, descriptors, train_set):
-    model = make_gpr_model(descriptors, 4, use_ard_kernel=use_adr)
+def test_make_model(use_adr, elements, descriptors, train_set):
+    model = make_gpr_model(elements, descriptors, 4, use_ard_kernel=use_adr)
 
     # Evaluate on a single point
     model.eval()
-    pred_y = model(torch.from_numpy(descriptors[0, :, :]))
+    pred_y = model(
+        torch.from_numpy(elements),
+        torch.from_numpy(descriptors[0, :, :])
+    )
     assert pred_y.shape == (3,)  # 3 Atoms
 
 
 @mark.parametrize('use_adr', [True, False])
-def test_train(descriptors, train_set, use_adr):
+def test_train(elements, descriptors, train_set, use_adr):
     # Make the model and the training set
     train_y = np.array([a.get_potential_energy() for a in train_set])
     train_y -= train_y.min()
-    model = make_gpr_model(descriptors, 4, use_ard_kernel=use_adr)
-    model.inducing_x.requires_grad = False
+    model = make_gpr_model(elements, descriptors, 4, use_ard_kernel=use_adr)
+    for submodel in model.models.values():
+        submodel.inducing_x.requires_grad = False
 
     # Evaluate the untrained model
     model.eval()
-    pred_y = model(torch.from_numpy(descriptors.reshape((-1, descriptors.shape[-1]))))
+    pred_y = model(
+        torch.from_numpy(np.repeat(elements, descriptors.shape[0])),
+        torch.from_numpy(descriptors.reshape((-1, descriptors.shape[-1])))
+    )
     assert pred_y.dtype == torch.float64
+    pred_y = torch.reshape(pred_y, [-1, elements.shape[0]])
     error_y = pred_y.sum(axis=-1).detach().numpy() - train_y
     mae_untrained = np.abs(error_y).mean()
 
     # Train
-    losses = train_model(model, descriptors, train_y, 64)
+    losses = train_model(model, elements, descriptors, train_y, 64)
     assert len(losses) == 64
 
     # Run the evaluation
     model.eval()
-    pred_y = model(torch.from_numpy(descriptors.reshape((-1, descriptors.shape[-1]))))
+    pred_y = model(
+        torch.from_numpy(np.repeat(elements, descriptors.shape[0])),
+        torch.from_numpy(descriptors.reshape((-1, descriptors.shape[-1])))
+    )
+    pred_y = torch.reshape(pred_y, [-1, elements.shape[0]])
     error_y = pred_y.sum(axis=-1).detach().numpy() - train_y
     mae_trained = np.abs(error_y).mean()
     assert mae_trained < mae_untrained
 
 
-def test_calculator(descriptors, soap, train_set):
+def test_calculator(elements, descriptors, soap, train_set):
     # Scale the input and outputs
     train_y = np.array([a.get_potential_energy() for a in train_set])
     train_y -= train_y.mean()
@@ -69,8 +86,8 @@ def test_calculator(descriptors, soap, train_set):
     descriptors = (descriptors - offset_x) / scale_x
 
     # Assemble and train for a few instances so that we get nonzero forces
-    model = make_gpr_model(descriptors, 32)
-    train_model(model, descriptors, train_y, 32)
+    model = make_gpr_model(elements, descriptors, 32)
+    train_model(model, elements, descriptors, train_y, 32)
 
     # Make the model
     calc = DScribeLocalCalculator(
@@ -93,7 +110,7 @@ def test_model(soap, train_set):
     model = DScribeLocalEnergyModel(
         reference=train_set[0],
         descriptors=soap,
-        model_fn=lambda x: make_gpr_model(x, num_inducing_points=32),
+        model_fn=lambda x: make_gpr_model(train_set[0].get_atomic_numbers(), x, num_inducing_points=32),
         num_calculators=4,
     )
 
