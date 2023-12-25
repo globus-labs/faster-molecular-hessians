@@ -117,6 +117,10 @@ def test_model(soap, train_set):
     # Run the fitting
     calcs = model.train(train_set)
 
+    # Make sure the forces are reasonable
+    eng = calcs[0].get_potential_energy(train_set[0])
+    assert np.isclose(eng, train_set[0].get_potential_energy(), atol=1e-2)
+
     # Test the mean hessian function
     mean_hess = model.mean_hessian(calcs)
     assert mean_hess.shape == (9, 9), 'Wrong shape'

@@ -316,6 +316,6 @@ class DScribeLocalEnergyModel(ASEEnergyModel):
             model=model,
             desc=self.descriptors,
             desc_scaling=(offset_x, scale_x),
-            energy_scaling=(offset_y, scale_y),
+            energy_scaling=(offset_y / len(data[0]), scale_y / len(data[0])),
             device=self.device
         )
