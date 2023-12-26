@@ -117,9 +117,13 @@ def test_model(soap, train_set):
     # Run the fitting
     calcs = model.train(train_set)
 
-    # Make sure the forces are reasonable
+    # Make sure the energy is reasonable
     eng = calcs[0].get_potential_energy(train_set[0])
     assert np.isclose(eng, train_set[0].get_potential_energy(), atol=1e-2)
+
+    # Make sure they differ between entries
+    pred_e = [calcs[0].get_potential_energy(a) for a in train_set]
+    assert np.std(pred_e) > 1e-3
 
     # Test the mean hessian function
     mean_hess = model.mean_hessian(calcs)

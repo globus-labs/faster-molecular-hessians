@@ -69,6 +69,7 @@ class PerElementModule(torch.nn.Module):
 def make_gpr_model(elements: np.ndarray,
                    descriptors: np.ndarray,
                    num_inducing_points: int,
+                   fix_inducing_points: bool = True,
                    use_ard_kernel: bool = False) -> PerElementModule:
     """Make the GPR model for a certain atomic system
 
@@ -78,6 +79,7 @@ def make_gpr_model(elements: np.ndarray,
         elements: Element for each atom in a structure (num_atoms,)
         descriptors: 3D array of all training points (num_configurations, num_atoms, num_descriptors)
         num_inducing_points: Number of inducing points to use in the kernel for each model. More points, more complex model
+        fix_inducing_points: Whether to fix the inducing points or allow them to be learned
         use_ard_kernel: Whether to use a different length scale parameter for each descriptor
     Returns:
         Model which can predict energy given descriptors for a single configuration
@@ -89,6 +91,7 @@ def make_gpr_model(elements: np.ndarray,
 
     for element in element_types:
         # Select a set of inducing points from records of each atom
+        #  TODO (wardlt): Use a method which ensures diversity, like KMeans
         mask = elements == element
         masked_descriptors = descriptors[:, mask, :]
         masked_descriptors = np.reshape(masked_descriptors, (-1, masked_descriptors.shape[-1]))
@@ -97,15 +100,17 @@ def make_gpr_model(elements: np.ndarray,
         inducing_points = masked_descriptors[inducing_inds, :]
 
         # Make the model
-        models[element] = InducedKernelGPR(
+        model = InducedKernelGPR(
             inducing_x=torch.from_numpy(inducing_points),
             use_ard=use_ard_kernel,
         )
+        model.inducing_x.requires_grad = not fix_inducing_points
+        models[element] = model
 
     return PerElementModule(models)
 
 
-def train_model(model: torch.nn.Module,
+def train_model(model: PerElementModule,
                 train_e: np.ndarray,
                 train_x: np.ndarray,
                 train_y: np.ndarray,
@@ -113,6 +118,7 @@ def train_model(model: torch.nn.Module,
                 batch_size: int = 4,
                 learning_rate: float = 0.01,
                 device: Union[str, torch.device] = 'cpu',
+                patience: Optional[int] = None,
                 verbose: bool = False) -> pd.DataFrame:
     """Train the kernel model over many iterations
 
@@ -127,6 +133,7 @@ def train_model(model: torch.nn.Module,
         batch_size: Number of conformers per batch
         learning_rate: Learning rate used for the optimizer
         device: Which device to use for training
+        patience: If provided, stop learning if train loss fails to improve after these many iterations
         verbose: Whether to display a progress bar
     Returns:
         Mean loss over each iteration
@@ -157,7 +164,10 @@ def train_model(model: torch.nn.Module,
 
     # Iterate over the data multiple times
     losses = []
-    for _ in tqdm(range(steps), disable=not verbose, leave=False):
+    iterator = tqdm(range(steps), disable=not verbose, leave=False)
+    no_improvement = 0  # Number of epochs w/o improvement
+    best_loss = np.inf
+    for _ in iterator:
         epoch_loss = 0
         for batch_x, batch_y in loader:
             # Prepare at the beginning of each batch
@@ -182,7 +192,15 @@ def train_model(model: torch.nn.Module,
             opt.step()
             epoch_loss += batch_loss.item()
 
+        # Update the best loss
+        no_improvement = 0 if epoch_loss < best_loss else no_improvement + 1
+        best_loss = min(best_loss, epoch_loss)
+        iterator.set_description(f'Loss: {epoch_loss:.2e} - Patience: {no_improvement}')
         losses.append(epoch_loss)
+
+        # Break if no improvement
+        if patience is not None and no_improvement > patience:
+            break
 
     # Pull the model back off the GPU
     model.to('cpu')
@@ -229,8 +247,11 @@ class DScribeLocalCalculator(Calculator):
         desc.requires_grad = True
         d_desc_d_pos = torch.from_numpy(d_desc_d_pos)
 
-        # Move the model to device if need be
-        model: torch.nn.Module = self.parameters['model']
+        # Make sure the model has all the required elements
+        model: PerElementModule = self.parameters['model']
+        missing_elems = set(map(str, atoms.get_atomic_numbers())).difference(model.models.keys())
+        if len(missing_elems) > 0:
+            raise ValueError(f'Model lacks parameters for elements: {", ".join(missing_elems)}')
         device = self.parameters['device']
         model.to(device)
 
@@ -285,7 +306,7 @@ class DScribeLocalEnergyModel(ASEEnergyModel):
     def __init__(self,
                  reference: Atoms,
                  descriptors: DescriptorLocal,
-                 model_fn: Callable[[np.ndarray], torch.nn.Module],
+                 model_fn: Callable[[np.ndarray], PerElementModule],
                  num_calculators: int,
                  device: str = 'cpu',
                  train_options: Optional[dict] = None):
@@ -296,26 +317,29 @@ class DScribeLocalEnergyModel(ASEEnergyModel):
         self.train_options = train_options or {'steps': 4}
 
     def train_calculator(self, data: list[Atoms]) -> Calculator:
-        # Train it using the user-provided options
+        # Get the elements
+        elements = data[0].get_atomic_numbers()
+
+        # Prepare the training set, scaling the input
         train_x = self.descriptors.create(data)
         offset_x = train_x.mean(axis=(0, 1))
-        scale_x = np.clip(train_x.std(axis=(0, 1)), a_min=1e-6, a_max=None)
         train_x -= offset_x
+        scale_x = np.clip(train_x.std(axis=(0, 1)), a_min=1e-6, a_max=None)
         train_x /= scale_x
 
-        train_y = np.array([a.get_potential_energy() for a in data])
-        scale_y, offset_y = np.std(train_y), np.mean(train_y)
-        train_y = (train_y - offset_y) / scale_y
+        train_y_per_atom = np.array([a.get_potential_energy() / len(a) for a in data])
+        scale, offset = train_y_per_atom.std(), train_y_per_atom.mean()
+        train_y = np.array([(a.get_potential_energy() - len(a) * offset) / scale for a in data])
 
-        # Make then train the model
+        # Make the model and train it
         model = self.model_fn(train_x)
-        train_model(model, data[0].get_atomic_numbers(), train_x, train_y, device=self.device, **self.train_options)
+        train_model(model, elements, train_x, train_y, device=self.device, **self.train_options)
 
-        # Make the calculator
+        # Return the model
         return DScribeLocalCalculator(
             model=model,
             desc=self.descriptors,
             desc_scaling=(offset_x, scale_x),
-            energy_scaling=(offset_y / len(data[0]), scale_y / len(data[0])),
+            energy_scaling=(offset, scale),
             device=self.device
         )
