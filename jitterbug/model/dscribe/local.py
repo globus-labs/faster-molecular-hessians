@@ -1,5 +1,5 @@
 """Create a PyTorch-based model which uses features for each atom"""
-from typing import Union, Optional, Callable
+from typing import Union, Optional, Callable, Sequence
 
 import ase
 from ase.calculators.calculator import Calculator, all_changes
@@ -41,7 +41,7 @@ class InducedKernelGPR(torch.nn.Module):
         esd = torch.exp(-diff)
 
         # Return the sum
-        return torch.tensordot(self.alpha, esd, dims=([0], [0]))
+        return torch.tensordot(self.alpha, esd, dims=([0], [0]))[:, None]
 
 
 class PerElementModule(torch.nn.Module):
@@ -62,8 +62,50 @@ class PerElementModule(torch.nn.Module):
         for elem, model in self.models.items():
             elem_id = int(elem)
             mask = element == elem_id
-            output[mask] = model(desc[mask, :])
+            output[mask] = model(desc[mask, :])[:, 0]
         return output
+
+
+def make_nn_model(
+        elements: np.ndarray,
+        descriptors: np.ndarray,
+        hidden_layers: Sequence[int] = (),
+        activation: torch.nn.Module = torch.nn.Sigmoid()
+) -> PerElementModule:
+    """Make a neural network model for a certain atomic system
+
+    Assumes that the descriptors have already been scaled
+
+    Args:
+        elements: Element for each atom in a structure (num_atoms,)
+        descriptors: 3D array of all training points (num_configurations, num_atoms, num_descriptors)
+        hidden_layers: Number of units in the hidden layers
+        activation: Activation function used for the hidden layers
+    """
+
+    # Detect the dtype
+    dtype = torch.from_numpy(descriptors[0, 0, :1]).dtype
+
+    # Make a model for each element type
+    models: dict[int, torch.nn.Sequential] = {}
+    element_types = np.unique(elements)
+
+    for element in element_types:
+        # Make the neural network
+        nn_layers = []
+        input_size = descriptors.shape[2]
+        for hidden_size in hidden_layers:
+            nn_layers.extend([
+                torch.nn.Linear(input_size, hidden_size, dtype=dtype),
+                activation
+            ])
+            input_size = hidden_size
+
+        # Make the last layer
+        nn_layers.append(torch.nn.Linear(input_size, 1, dtype=dtype))
+        models[element] = torch.nn.Sequential(*nn_layers)
+
+    return PerElementModule(models)
 
 
 def make_gpr_model(elements: np.ndarray,
@@ -237,9 +279,9 @@ class DScribeLocalCalculator(Calculator):
         d_desc_d_pos, desc = self.parameters['desc'].derivatives(atoms, attach=True)
 
         # Scale the descriptors
-        offset, scale = self.parameters['desc_scaling']
-        desc = (desc - offset) / scale
-        d_desc_d_pos /= scale
+        desc_offset, desc_scale = self.parameters['desc_scaling']
+        desc = (desc - desc_offset) / desc_scale
+        d_desc_d_pos /= desc_scale
 
         # Convert to pytorch
         #  TODO (wardlt): Make it possible to convert to float32 or lower
@@ -256,13 +298,13 @@ class DScribeLocalCalculator(Calculator):
         model.to(device)
 
         # Run inference
-        offset, scale = self.parameters['energy_scaling']
+        eng_offset, eng_scale = self.parameters['energy_scaling']
         elements = torch.from_numpy(atoms.get_atomic_numbers())
         model.eval()  # Ensure we're in eval mode
         elements = elements.to(device)
         desc = desc.to(device)
         pred_energies_dist = model(elements, desc)
-        pred_energies = pred_energies_dist * scale + offset
+        pred_energies = pred_energies_dist * eng_scale + eng_offset
         pred_energy = torch.sum(pred_energies)
         self.results['energy'] = pred_energy.item()
         self.results['energies'] = pred_energies.detach().cpu().numpy()
@@ -273,6 +315,7 @@ class DScribeLocalCalculator(Calculator):
             # Derivatives for the descriptors are for each center (which is the input to the model) with respect to each atomic coordinate changing.
             # Energy is summed over the contributions from each center.
             # The total force is therefore a sum over the effect of an atom moving on all centers
+            # Note: Forces are scaled because pred_energy was scaled
             d_energy_d_desc = torch.autograd.grad(
                 outputs=pred_energy,
                 inputs=desc,
@@ -280,7 +323,7 @@ class DScribeLocalCalculator(Calculator):
             )[0]  # Derivative of the energy with respect to the descriptors for each center
             d_desc_d_pos = d_desc_d_pos.to(device)
             d_energy_d_center_d_pos = torch.einsum('ijkl,il->ijk', d_desc_d_pos, d_energy_d_desc)  # Derivative for each center with respect to each atom
-            pred_forces = -d_energy_d_center_d_pos.sum(dim=0) * scale  # Total effect on each center from each atom
+            pred_forces = -d_energy_d_center_d_pos.sum(dim=0)  # Total effect on each center from each atom
 
             # Store the results
             self.results['forces'] = pred_forces.detach().cpu().numpy()
