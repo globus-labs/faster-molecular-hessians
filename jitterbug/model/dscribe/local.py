@@ -23,15 +23,21 @@ class InducedKernelGPR(torch.nn.Module):
         inducing_x: Starting points for the reference points of the kernel
         use_ard: Whether to employ a different length scale parameter for each descriptor,
             a technique known as Automatic Relevance Detection (ARD)
+        initial_lengthscale: Initial value for the lengthscale parmaeter
     """
 
-    def __init__(self, inducing_x: torch.Tensor, use_ard: bool):
+    def __init__(self, inducing_x: torch.Tensor, use_ard: bool, initial_lengthscale: float = 10):
         super().__init__()
         n_points, n_desc = inducing_x.shape
         self.inducing_x = torch.nn.Parameter(inducing_x.clone())
         self.alpha = torch.nn.Parameter(torch.empty((n_points,), dtype=inducing_x.dtype))
         torch.nn.init.normal_(self.alpha)
-        self.lengthscales = torch.nn.Parameter(-torch.ones((n_desc,), dtype=inducing_x.dtype) if use_ard else -torch.ones((1,), dtype=inducing_x.dtype))
+
+        # Initial value
+        ls = np.log(initial_lengthscale)
+        self.lengthscales = torch.nn.Parameter(
+            -torch.ones((n_desc,), dtype=inducing_x.dtype) * ls if use_ard else
+            -torch.ones((1,), dtype=inducing_x.dtype) * ls)
 
     def forward(self, x) -> torch.Tensor:
         # Compute an RBF kernel
@@ -112,10 +118,13 @@ def make_gpr_model(elements: np.ndarray,
                    descriptors: np.ndarray,
                    num_inducing_points: int,
                    fix_inducing_points: bool = True,
-                   use_ard_kernel: bool = False) -> PerElementModule:
+                   use_ard_kernel: bool = False,
+                   **kwargs) -> PerElementModule:
     """Make the GPR model for a certain atomic system
 
-    Assumes that the descriptors have already been scaled
+    Assumes that the descriptors have already been scaled.
+
+    Passes additional kwargs to the :class:`InducedKernelGPR` constructor.
 
     Args:
         elements: Element for each atom in a structure (num_atoms,)
@@ -145,6 +154,7 @@ def make_gpr_model(elements: np.ndarray,
         model = InducedKernelGPR(
             inducing_x=torch.from_numpy(inducing_points),
             use_ard=use_ard_kernel,
+            **kwargs
         )
         model.inducing_x.requires_grad = not fix_inducing_points
         models[element] = model
@@ -322,7 +332,11 @@ class DScribeLocalCalculator(Calculator):
                 grad_outputs=torch.ones_like(pred_energy),
             )[0]  # Derivative of the energy with respect to the descriptors for each center
             d_desc_d_pos = d_desc_d_pos.to(device)
-            d_energy_d_center_d_pos = torch.einsum('ijkl,il->ijk', d_desc_d_pos, d_energy_d_desc)  # Derivative for each center with respect to each atom
+
+            # Einsum is log-form for: dE_d(center:i from atom:j moving direction:k)
+            #  = sum_(descriptors:l) d(descriptor:l)/d(i,j,k) * dE(center:i)/d(l)
+            # "Use the chain rule to get the change in energy for each center
+            d_energy_d_center_d_pos = torch.einsum('ijkl,il->ijk', d_desc_d_pos, d_energy_d_desc)
             pred_forces = -d_energy_d_center_d_pos.sum(dim=0)  # Total effect on each center from each atom
 
             # Store the results
