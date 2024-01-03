@@ -43,7 +43,7 @@ realpath .''',
     "scheduler_options":"" ,
     "account":          "CSC249ADCD08_CNDA",
     "queue":            "EarlyAppAccess",
-    "walltime":         "04:00:00",
+    "walltime":         "12:00:00",
     "nodes_per_block":  4, # think of a block as one job on sunspot
     "cpus_per_node":    208, # this is the number of threads available on one sunspot node
 }

@@ -6,13 +6,13 @@ from parsl.addresses import address_by_interface
 
 
 # Configure the launch command
-exachem_per_block = 16
-nodes_per_exachem = 8
+exachem_per_block = 128
+nodes_per_exachem = 1
 ranks_per_node = 13
 total_ranks = nodes_per_exachem * ranks_per_node
 exachem_cmd = (
         f'mpiexec -n {total_ranks} --ppn {ranks_per_node}'
-        ' --hostfile /tmp/hostfiles/local_hostfile.`printf %02d $PARSL_WORKER_RANK`'
+        ' --hostfile /tmp/hostfiles/local_hostfile.`printf %03d $PARSL_WORKER_RANK`'
         ' --spindle --pmi=pmix --cpu-bind list:2:10:18:26:34:42:58:66:74:82:90:98:99 --mem-bind list:0:0:0:0:0:0:1:1:1:1:1:1:1'
         ' --env TAMM_USE_MEMKIND=1 --env OMP_NUM_THREADS=1 $BINDSH $EXE exachem.json 1>exachem.out 2>exachem.err')
 
@@ -21,7 +21,7 @@ user_opts = {
     "worker_init": f'''
 # Make the hostfiles for each worker
 mkdir -p /tmp/hostfiles/
-split --lines={nodes_per_exachem} -d --suffix-length=2 $PBS_NODEFILE /tmp/hostfiles/local_hostfile.
+split --lines={nodes_per_exachem} -d --suffix-length=3 $PBS_NODEFILE /tmp/hostfiles/local_hostfile.
 ls /tmp/hostfiles
 
 # Exachem Env
@@ -60,7 +60,7 @@ realpath .''',
     "scheduler_options":"" ,
     "account":          "CSC249ADCD08_CNDA",
     "queue":            "EarlyAppAccess",
-    "walltime":         "12:00:00",
+    "walltime":         "2:00:00",
     "nodes_per_block":  exachem_per_block * nodes_per_exachem,
     "cpus_per_node":    208, # this is the number of threads available on one sunspot node
 }
@@ -88,4 +88,4 @@ def make_config():
                     cpus_per_node=user_opts["cpus_per_node"],
                 )
            )
-            ],), exachem_per_block + 1, {'command': exachem_cmd, 'scratch_dir': '/lus/gecko/projects/CSC249ADCD08_CNDA/faster-molecular-hessians/exachem-output', 'cleanup': False}
+            ],), exachem_per_block + 1, {'command': exachem_cmd, 'scratch_dir': '/lus/gecko/projects/CSC249ADCD08_CNDA/faster-molecular-hessians/exachem-output', 'cleanup': True}
